@@ -78,7 +78,7 @@ if ([string]::IsNullOrWhiteSpace($usageHome)) {
 $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
 $claudeUsageFile = Join-Path $usageHome "claude-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-latest.json"
-$defaultWindowSize = New-Object System.Drawing.Size(520, 112)
+$defaultWindowSize = New-Object System.Drawing.Size(420, 112)
 
 if (-not $combinedMode) {
   $claudeUsageFile = $UsageFile
@@ -90,7 +90,7 @@ $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
-$form.MinimumSize = New-Object System.Drawing.Size(380, 96)
+$form.MinimumSize = New-Object System.Drawing.Size(360, 96)
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(1, 2, 3)
@@ -147,7 +147,7 @@ $panel.Controls.Add($title)
 $main = New-Object System.Windows.Forms.Label
 $main.AutoSize = $false
 $main.Location = New-Object System.Drawing.Point(14, 34)
-$main.Size = New-Object System.Drawing.Size(492, 64)
+$main.Size = New-Object System.Drawing.Size(392, 58)
 $main.Font = New-Object System.Drawing.Font("Cascadia Mono", 15, [System.Drawing.FontStyle]::Bold)
 $main.ForeColor = [System.Drawing.Color]::FromArgb(126, 231, 180)
 $main.Text = "Waiting for usage..."
@@ -155,8 +155,8 @@ $panel.Controls.Add($main)
 
 $detail = New-Object System.Windows.Forms.Label
 $detail.AutoSize = $false
-$detail.Location = New-Object System.Drawing.Point(14, 112)
-$detail.Size = New-Object System.Drawing.Size(492, 1)
+$detail.Location = New-Object System.Drawing.Point(0, 0)
+$detail.Size = New-Object System.Drawing.Size(1, 1)
 $detail.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Drawing.FontStyle]::Regular)
 $detail.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
 $detail.Text = $UsageFile
@@ -165,8 +165,8 @@ $panel.Controls.Add($detail)
 
 $costToggle = New-Object System.Windows.Forms.Label
 $costToggle.AutoSize = $false
-$costToggle.Location = New-Object System.Drawing.Point(14, 158)
-$costToggle.Size = New-Object System.Drawing.Size(532, 20)
+$costToggle.Location = New-Object System.Drawing.Point(0, 0)
+$costToggle.Size = New-Object System.Drawing.Size(1, 1)
 $costToggle.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Drawing.FontStyle]::Regular)
 $costToggle.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
 $costToggle.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -286,6 +286,7 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
 $timer.Add_Tick({
   Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+  Resize-OverlayToContent -Form $form -Title $title -Main $main
 })
 
 function Update-UsageView {
@@ -326,7 +327,7 @@ function Update-UsageView {
     $cached = Format-Percent $pct.cached_input 1
     $age = Format-Age $json.generated_at
 
-    $Title.Text = "$model  |  $age"
+    $Title.Text = "$model"
     $Main.Text = "5h $fiveHour   week $week"
     $Detail.Text = ""
     $CostToggle.Text = ""
@@ -359,9 +360,7 @@ function Update-CombinedUsageView {
     return
   }
 
-  $claudeAge = if ($null -eq $claude) { "missing" } else { Format-Age $claude.generated_at }
-  $codexAge = if ($null -eq $codex) { "missing" } else { Format-Age $codex.generated_at }
-  $Title.Text = "Claude $claudeAge  |  Codex $codexAge"
+  $Title.Text = "Usage"
 
   $claudeLine = if ($null -eq $claude) {
     "Claude 5h ?      week ?"
@@ -396,6 +395,65 @@ function Update-CombinedUsageView {
 
   $Detail.Text = ""
   $CostToggle.Text = ""
+}
+
+function Resize-OverlayToContent {
+  param(
+    [System.Windows.Forms.Form]$Form,
+    [System.Windows.Forms.Label]$Title,
+    [System.Windows.Forms.Label]$Main
+  )
+
+  $titleWidth = Measure-TextWidth -Text $Title.Text -Font $Title.Font
+  $mainWidth = Measure-MultilineTextWidth -Text $Main.Text -Font $Main.Font
+
+  $desiredWidth = [Math]::Max(
+    $Form.MinimumSize.Width,
+    [Math]::Max(
+      $titleWidth + 104,
+      $mainWidth + 34
+    )
+  )
+
+  $desiredWidth = [Math]::Min(560, $desiredWidth)
+
+  if ([Math]::Abs($Form.Width - $desiredWidth) -gt 8) {
+    $Form.Width = $desiredWidth
+  }
+}
+
+function Measure-MultilineTextWidth {
+  param(
+    [string]$Text,
+    [System.Drawing.Font]$Font
+  )
+
+  $maxWidth = 0
+
+  foreach ($line in ([string]$Text -split "`r?`n")) {
+    $maxWidth = [Math]::Max(
+      $maxWidth,
+      (Measure-TextWidth -Text $line -Font $Font)
+    )
+  }
+
+  return $maxWidth
+}
+
+function Measure-TextWidth {
+  param(
+    [string]$Text,
+    [System.Drawing.Font]$Font
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Text)) {
+    return 0
+  }
+
+  return [System.Windows.Forms.TextRenderer]::MeasureText(
+    $Text,
+    $Font
+  ).Width
 }
 
 function Read-UsageJson {
@@ -476,5 +534,6 @@ function Format-Age {
 }
 
 Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+Resize-OverlayToContent -Form $form -Title $title -Main $main
 $timer.Start()
 [void][System.Windows.Forms.Application]::Run($form)
