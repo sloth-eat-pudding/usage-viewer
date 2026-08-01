@@ -247,16 +247,32 @@ function formatSummary(snapshot) {
   const limitName = week === null ? 'limit' : 'week'
 
   return [
-    `codex ${limitName}:${limit === null ? '?' : `${limit.toFixed(2)}%`}`,
-    `in:${formatInteger(snapshot.tokens.total_input)}`,
-    `cached:${snapshot.percentages.cached_input.toFixed(1)}%`,
-    `out:${formatInteger(snapshot.tokens.output)}`,
-    `ctx:${snapshot.percentages.context_used === null ? '?' : `${snapshot.percentages.context_used.toFixed(1)}%`}`
-  ].join(' | ')
+    `Codex ${limitName}: ${limit === null ? '?' : `${limit.toFixed(2)}%`}`,
+    `Context: ${snapshot.percentages.context_used === null ? '?' : `${snapshot.percentages.context_used.toFixed(1)}%`}`,
+    `Input: ${formatInteger(snapshot.tokens.total_input)}`,
+    `Cached input: ${formatInteger(snapshot.tokens.cache_read_input)} (${snapshot.percentages.cached_input.toFixed(1)}%)`,
+    `New input: ${formatInteger(snapshot.tokens.new_input)}`,
+    `Output: ${formatInteger(snapshot.tokens.output)}`,
+    `Reasoning output: ${formatInteger(snapshot.tokens.reasoning_output)}`,
+    `Session total: ${formatInteger(snapshot.tokens.session_total)}`,
+    `Plan: ${snapshot.rate_limits.plan_type || '?'}`,
+    `Window minutes: ${snapshot.rate_limits.primary.window_minutes || '?'}`,
+    `Reset: ${formatEpoch(snapshot.rate_limits.primary.resets_at_epoch_seconds)}`,
+    `Source: ${snapshot.source_file}`
+  ].join('\n') + '\n'
 }
 
 function formatInteger(value) {
   return new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 0
   }).format(value)
+}
+
+function formatEpoch(epochSeconds) {
+  const number = nullableNumber(epochSeconds)
+  if (number === null) {
+    return '?'
+  }
+
+  return new Date(number * 1000).toISOString()
 }

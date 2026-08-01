@@ -78,7 +78,7 @@ if ([string]::IsNullOrWhiteSpace($usageHome)) {
 $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
 $claudeUsageFile = Join-Path $usageHome "claude-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-latest.json"
-$defaultWindowSize = New-Object System.Drawing.Size(560, 188)
+$defaultWindowSize = New-Object System.Drawing.Size(520, 112)
 
 if (-not $combinedMode) {
   $claudeUsageFile = $UsageFile
@@ -90,7 +90,7 @@ $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
-$form.MinimumSize = New-Object System.Drawing.Size(440, 160)
+$form.MinimumSize = New-Object System.Drawing.Size(380, 96)
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(1, 2, 3)
@@ -147,7 +147,7 @@ $panel.Controls.Add($title)
 $main = New-Object System.Windows.Forms.Label
 $main.AutoSize = $false
 $main.Location = New-Object System.Drawing.Point(14, 34)
-$main.Size = New-Object System.Drawing.Size(532, 76)
+$main.Size = New-Object System.Drawing.Size(492, 64)
 $main.Font = New-Object System.Drawing.Font("Cascadia Mono", 15, [System.Drawing.FontStyle]::Bold)
 $main.ForeColor = [System.Drawing.Color]::FromArgb(126, 231, 180)
 $main.Text = "Waiting for usage..."
@@ -156,10 +156,11 @@ $panel.Controls.Add($main)
 $detail = New-Object System.Windows.Forms.Label
 $detail.AutoSize = $false
 $detail.Location = New-Object System.Drawing.Point(14, 112)
-$detail.Size = New-Object System.Drawing.Size(532, 44)
+$detail.Size = New-Object System.Drawing.Size(492, 1)
 $detail.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Drawing.FontStyle]::Regular)
 $detail.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
 $detail.Text = $UsageFile
+$detail.Visible = $false
 $panel.Controls.Add($detail)
 
 $costToggle = New-Object System.Windows.Forms.Label
@@ -170,6 +171,7 @@ $costToggle.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Dr
 $costToggle.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
 $costToggle.Cursor = [System.Windows.Forms.Cursors]::Hand
 $costToggle.Text = "> cost hidden"
+$costToggle.Visible = $false
 $panel.Controls.Add($costToggle)
 
 $script:showCost = $false
@@ -178,19 +180,9 @@ $script:heightBeforeCostExpand = $null
 $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 28)
   $titleWidth = [Math]::Max(80, $panel.ClientSize.Width - 88)
-  $costHeight = Get-CostToggleHeight -Label $costToggle -Width $width
-  $detailHeight = [Math]::Max(
-    32,
-    $panel.ClientSize.Height - $detail.Top - $costHeight - 14
-  )
 
   $title.Width = $titleWidth
   $main.Width = $width
-  $detail.Width = $width
-  $detail.Height = $detailHeight
-  $costToggle.Top = $detail.Top + $detail.Height + 2
-  $costToggle.Width = $width
-  $costToggle.Height = $costHeight
   $resetButton.Left = $panel.ClientSize.Width - 66
   $closeButton.Left = $panel.ClientSize.Width - 34
 }
@@ -236,24 +228,6 @@ foreach ($control in @($form, $panel, $title, $main, $detail, $costToggle)) {
   $control.Add_MouseMove($mouseMove)
   $control.Add_MouseUp($mouseUp)
 }
-
-$toggleCost = {
-  $script:showCost = -not $script:showCost
-
-  if ($script:showCost) {
-    $script:heightBeforeCostExpand = $form.Height
-  } else {
-    if ($script:heightBeforeCostExpand -ne $null) {
-      $form.Height = [Math]::Max($form.MinimumSize.Height, [int]$script:heightBeforeCostExpand)
-      $script:heightBeforeCostExpand = $null
-    }
-  }
-
-  Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
-  Ensure-CostToggleFits -Form $form -Panel $panel -CostToggle $costToggle
-  & $layoutOverlay
-}
-$costToggle.Add_Click($toggleCost)
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $closeItem = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -308,58 +282,6 @@ function Get-ResizeHitTest {
   return 0
 }
 
-function Get-CostToggleHeight {
-  param(
-    [System.Windows.Forms.Label]$Label,
-    [int]$Width
-  )
-
-  $minimumHeight = if ($script:showCost) { 20 } else { 20 }
-  $text = [string]$Label.Text
-
-  if ([string]::IsNullOrWhiteSpace($text)) {
-    return $minimumHeight
-  }
-
-  $proposedSize = New-Object System.Drawing.Size(
-    [Math]::Max(40, $Width),
-    1000
-  )
-
-  $flags =
-    [System.Windows.Forms.TextFormatFlags]::WordBreak -bor
-    [System.Windows.Forms.TextFormatFlags]::TextBoxControl
-
-  $measured = [System.Windows.Forms.TextRenderer]::MeasureText(
-    $text,
-    $Label.Font,
-    $proposedSize,
-    $flags
-  )
-
-  return [Math]::Max($minimumHeight, $measured.Height + 6)
-}
-
-function Ensure-CostToggleFits {
-  param(
-    [System.Windows.Forms.Form]$Form,
-    [System.Windows.Forms.Panel]$Panel,
-    [System.Windows.Forms.Label]$CostToggle
-  )
-
-  if (-not $script:showCost) {
-    return
-  }
-
-  $width = [Math]::Max(80, $Panel.ClientSize.Width - 28)
-  $costHeight = Get-CostToggleHeight -Label $CostToggle -Width $width
-  $requiredClientHeight = $detail.Top + 32 + 2 + $costHeight + 12
-
-  if ($Panel.ClientSize.Height -lt $requiredClientHeight) {
-    $Form.Height += $requiredClientHeight - $Panel.ClientSize.Height
-  }
-}
-
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
 $timer.Add_Tick({
@@ -386,8 +308,8 @@ function Update-UsageView {
   if (-not (Test-Path -LiteralPath $UsageFile)) {
     $Title.Text = "Usage"
     $Main.Text = "Waiting for usage..."
-    $Detail.Text = $UsageFile
-    $CostToggle.Text = "> cost hidden"
+    $Detail.Text = ""
+    $CostToggle.Text = ""
     return
   }
 
@@ -404,20 +326,15 @@ function Update-UsageView {
     $cached = Format-Percent $pct.cached_input 1
     $age = Format-Age $json.generated_at
 
-    $Title.Text = "$model  |  updated $age"
+    $Title.Text = "$model  |  $age"
     $Main.Text = "5h $fiveHour   week $week"
-    $Detail.Text = "ctx $ctx  |  in $(Format-Count $tokens.total_input)  out $(Format-Count $tokens.output)`r`nnew $(Format-Count $tokens.new_input)  cached $cached"
-
-    if ($script:showCost) {
-      $CostToggle.Text = "v cost $$(Format-Usd $cost.session_usd)`r`n  turn $$(Format-Usd $cost.turn_usd)"
-    } else {
-      $CostToggle.Text = "> cost hidden"
-    }
+    $Detail.Text = ""
+    $CostToggle.Text = ""
   } catch {
     $Title.Text = "Usage"
     $Main.Text = "Read error"
-    $Detail.Text = $_.Exception.Message
-    $CostToggle.Text = "> cost hidden"
+    $Detail.Text = ""
+    $CostToggle.Text = ""
   }
 }
 
@@ -437,8 +354,8 @@ function Update-CombinedUsageView {
   if ($null -eq $claude -and $null -eq $codex) {
     $Title.Text = "Usage"
     $Main.Text = "Waiting for Claude / Codex usage..."
-    $Detail.Text = "$ClaudeUsageFile`r`n$CodexUsageFile"
-    $CostToggle.Text = "> cost hidden"
+    $Detail.Text = ""
+    $CostToggle.Text = ""
     return
   }
 
@@ -477,17 +394,8 @@ function Update-CombinedUsageView {
     "Codex  ctx $(Format-Percent $codex.percentages.context_used 1) in $(Format-Count $codex.tokens.total_input) out $(Format-Count $codex.tokens.output)"
   }
 
-  $Detail.Text = "$claudeDetail`r`n$codexDetail"
-
-  if ($script:showCost) {
-    if ($null -eq $claude) {
-      $CostToggle.Text = "v Claude cost unavailable"
-    } else {
-      $CostToggle.Text = "v Claude cost $$(Format-Usd $claude.cost.session_usd)`r`n  turn $$(Format-Usd $claude.cost.turn_usd)"
-    }
-  } else {
-    $CostToggle.Text = "> cost hidden"
-  }
+  $Detail.Text = ""
+  $CostToggle.Text = ""
 }
 
 function Read-UsageJson {
