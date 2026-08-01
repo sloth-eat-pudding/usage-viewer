@@ -20,6 +20,7 @@ node --version
 statusline-usage-capture.js   Claude Code statusLine usage 擷取器
 codex-usage-read.js            Codex session JSONL usage 讀取器
 UsageOverlay.ps1              透明 overlay
+build-exe.cmd                 建置 UsageViewer.exe
 start-overlay.cmd             啟動 overlay
 start-overlay.vbs             隱藏 console 啟動 overlay
 start-codex-overlay.cmd        啟動 Codex reader + overlay
@@ -44,6 +45,7 @@ codex-latest.json    Codex 最新 usage
 latest.json          相容舊版的最新 usage，可能被任一 reader 覆蓋
 history.jsonl        Claude Code 歷史紀錄
 codex-history.jsonl  Codex 歷史紀錄
+window-state.json    overlay 上次的位置與視窗大小
 ```
 
 overlay 預設同時讀：
@@ -76,6 +78,12 @@ C:\Users\user\.claude\settings.json
 
 ## 啟動
 
+建置 exe：
+
+```text
+C:\Users\user\Documents\usage_viewer\build-exe.cmd
+```
+
 只開 overlay：
 
 ```text
@@ -94,6 +102,14 @@ C:\Users\user\Documents\usage_viewer\start-codex-overlay.cmd
 C:\Users\user\Documents\usage_viewer\stop-codex-reader.cmd
 ```
 
+`start-overlay.cmd` 會優先啟動：
+
+```text
+C:\Users\user\Documents\usage_viewer\UsageViewer.exe
+```
+
+如果還沒有建置 exe，才會退回使用 `UsageOverlay.ps1`。
+
 ## Overlay 操作
 
 - 左鍵拖曳內容區：移動視窗
@@ -102,6 +118,18 @@ C:\Users\user\Documents\usage_viewer\stop-codex-reader.cmd
 - 點右上角 `X`：關閉
 
 overlay 無標頭、透明、置頂，且會顯示在 Windows 工具列。
+
+## 工具列圖示
+
+overlay 的工具列圖示放在：
+
+```text
+C:\Users\user\Documents\usage_viewer\assets\usage-viewer.ico
+```
+
+`UsageOverlay.ps1` 啟動時會自動讀取這個 `.ico` 並設定成視窗 icon。若要替換圖示，請用同名 `.ico` 覆蓋這個檔案後重新啟動 overlay。
+
+如果工具列仍顯示 PowerShell 圖示，請先關閉舊的 overlay 再重新啟動。Windows 有時會暫存工作列圖示或沿用舊視窗分組。
 
 ## 畫面欄位
 

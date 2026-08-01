@@ -57,6 +57,9 @@ public static class OverlayWindowInterop
 {
   public const int WM_NCLBUTTONDOWN = 0xA1;
 
+  [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+  public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
+
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern bool ReleaseCapture();
 
@@ -76,9 +79,13 @@ if ([string]::IsNullOrWhiteSpace($usageHome)) {
 }
 
 $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
+$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+$windowIconPath = Join-Path $scriptDirectory "assets\usage-viewer.ico"
 $claudeUsageFile = Join-Path $usageHome "claude-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-latest.json"
 $defaultWindowSize = New-Object System.Drawing.Size(420, 88)
+
+[OverlayWindowInterop]::SetCurrentProcessExplicitAppUserModelID("SlothEatPudding.UsageViewer") | Out-Null
 
 if (-not $combinedMode) {
   $claudeUsageFile = $UsageFile
@@ -86,12 +93,20 @@ if (-not $combinedMode) {
 
 $form = New-Object ResizableOverlayForm
 $form.Text = "Usage Viewer"
+if (Test-Path -LiteralPath $windowIconPath) {
+  try {
+    $form.Icon = New-Object System.Drawing.Icon($windowIconPath)
+  } catch {
+    Write-Verbose "Unable to load window icon: $($_.Exception.Message)"
+  }
+}
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
 $form.MinimumSize = New-Object System.Drawing.Size(360, 80)
 $form.TopMost = $true
+$form.ShowIcon = $true
 $form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(1, 2, 3)
 $form.TransparencyKey = $form.BackColor
