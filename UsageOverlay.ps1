@@ -78,7 +78,7 @@ if ([string]::IsNullOrWhiteSpace($usageHome)) {
 $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
 $claudeUsageFile = Join-Path $usageHome "claude-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-latest.json"
-$defaultWindowSize = New-Object System.Drawing.Size(420, 112)
+$defaultWindowSize = New-Object System.Drawing.Size(420, 88)
 
 if (-not $combinedMode) {
   $claudeUsageFile = $UsageFile
@@ -90,7 +90,7 @@ $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
-$form.MinimumSize = New-Object System.Drawing.Size(360, 96)
+$form.MinimumSize = New-Object System.Drawing.Size(360, 80)
 $form.TopMost = $true
 $form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(1, 2, 3)
@@ -137,16 +137,17 @@ $panel.Controls.Add($closeButton)
 
 $title = New-Object System.Windows.Forms.Label
 $title.AutoSize = $false
-$title.Location = New-Object System.Drawing.Point(14, 10)
-$title.Size = New-Object System.Drawing.Size(400, 22)
+$title.Location = New-Object System.Drawing.Point(0, 0)
+$title.Size = New-Object System.Drawing.Size(1, 1)
 $title.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 $title.ForeColor = [System.Drawing.Color]::FromArgb(235, 241, 247)
-$title.Text = "Usage"
+$title.Text = ""
+$title.Visible = $false
 $panel.Controls.Add($title)
 
 $main = New-Object System.Windows.Forms.Label
 $main.AutoSize = $false
-$main.Location = New-Object System.Drawing.Point(14, 34)
+$main.Location = New-Object System.Drawing.Point(14, 12)
 $main.Size = New-Object System.Drawing.Size(392, 58)
 $main.Font = New-Object System.Drawing.Font("Cascadia Mono", 15, [System.Drawing.FontStyle]::Bold)
 $main.ForeColor = [System.Drawing.Color]::FromArgb(126, 231, 180)
@@ -179,9 +180,6 @@ $script:heightBeforeCostExpand = $null
 
 $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 28)
-  $titleWidth = [Math]::Max(80, $panel.ClientSize.Width - 88)
-
-  $title.Width = $titleWidth
   $main.Width = $width
   $resetButton.Left = $panel.ClientSize.Width - 66
   $closeButton.Left = $panel.ClientSize.Width - 34
@@ -307,7 +305,7 @@ function Update-UsageView {
   }
 
   if (-not (Test-Path -LiteralPath $UsageFile)) {
-    $Title.Text = "Usage"
+    $Title.Text = ""
     $Main.Text = "Waiting for usage..."
     $Detail.Text = ""
     $CostToggle.Text = ""
@@ -327,12 +325,12 @@ function Update-UsageView {
     $cached = Format-Percent $pct.cached_input 1
     $age = Format-Age $json.generated_at
 
-    $Title.Text = "$model"
+    $Title.Text = ""
     $Main.Text = "5h $fiveHour   week $week"
     $Detail.Text = ""
     $CostToggle.Text = ""
   } catch {
-    $Title.Text = "Usage"
+    $Title.Text = ""
     $Main.Text = "Read error"
     $Detail.Text = ""
     $CostToggle.Text = ""
@@ -353,14 +351,14 @@ function Update-CombinedUsageView {
   $codex = Read-UsageJson $CodexUsageFile
 
   if ($null -eq $claude -and $null -eq $codex) {
-    $Title.Text = "Usage"
+    $Title.Text = ""
     $Main.Text = "Waiting for Claude / Codex usage..."
     $Detail.Text = ""
     $CostToggle.Text = ""
     return
   }
 
-  $Title.Text = "Usage"
+  $Title.Text = ""
 
   $claudeLine = if ($null -eq $claude) {
     "Claude 5h ?      week ?"
@@ -379,7 +377,7 @@ function Update-CombinedUsageView {
     "Codex  week $codexLimit"
   }
 
-  $Main.Text = "$claudeLine`r`n$codexLine"
+  $Main.Text = "$codexLine`r`n$claudeLine"
 
   $claudeDetail = if ($null -eq $claude) {
     "Claude waiting"
@@ -404,15 +402,11 @@ function Resize-OverlayToContent {
     [System.Windows.Forms.Label]$Main
   )
 
-  $titleWidth = Measure-TextWidth -Text $Title.Text -Font $Title.Font
   $mainWidth = Measure-MultilineTextWidth -Text $Main.Text -Font $Main.Font
 
   $desiredWidth = [Math]::Max(
     $Form.MinimumSize.Width,
-    [Math]::Max(
-      $titleWidth + 104,
-      $mainWidth + 34
-    )
+    $mainWidth + 34
   )
 
   $desiredWidth = [Math]::Min(560, $desiredWidth)
