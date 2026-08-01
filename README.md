@@ -24,8 +24,6 @@ start-overlay.cmd             啟動 overlay
 start-overlay.vbs             隱藏 console 啟動 overlay
 start-codex-overlay.cmd        啟動 Codex reader + overlay
 start-codex-reader.cmd         只啟動 Codex reader
-show-codex-usage.cmd           顯示一次 Codex CLI 細節
-codex-with-usage.cmd           先顯示 Codex usage，再啟動 codex
 stop-codex-reader.cmd          停止背景 Codex reader
 settings.json                 Claude Code 設定範例
 ```
@@ -96,31 +94,6 @@ C:\Users\user\Documents\usage_viewer\start-codex-overlay.cmd
 C:\Users\user\Documents\usage_viewer\stop-codex-reader.cmd
 ```
 
-手動讀一次 Codex usage：
-
-```powershell
-cd C:\Users\user\Documents\usage_viewer
-node .\codex-usage-read.js
-```
-
-或雙擊顯示可見 CLI 視窗：
-
-```text
-C:\Users\user\Documents\usage_viewer\show-codex-usage.cmd
-```
-
-如果想在進入 Codex CLI 前先看到 usage：
-
-```cmd
-C:\Users\user\Documents\usage_viewer\codex-with-usage.cmd
-```
-
-也可以帶參數，例如：
-
-```cmd
-C:\Users\user\Documents\usage_viewer\codex-with-usage.cmd --cd C:\Users\user\Documents\usage_viewer
-```
-
 ## Overlay 操作
 
 - 左鍵拖曳內容區：移動視窗
@@ -145,7 +118,8 @@ Codex  week 6.00%
 - `Claude 5h`: Claude Code 五小時 rate limit 使用百分比
 - `Claude week`: Claude Code 七天 rate limit 使用百分比
 - `Codex week`: Codex primary rate limit 使用百分比；目前你的 Codex 是七天視窗
-token、context、cost 等細節改由 CLI 顯示。Claude Code 的 CLI 來自 `statusLine` 輸出；Codex 可用 `node .\codex-usage-read.js` 或 `show-codex-usage.cmd` 顯示。
+
+Codex CLI 目前沒有支援自訂 header/status line，所以本專案不嘗試把 usage 塞進 Codex CLI 內部畫面。
 
 ## Codex 資料來源
 
