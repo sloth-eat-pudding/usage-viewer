@@ -10,6 +10,11 @@ const CODEX_HOME = process.env.CODEX_HOME ||
 const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
 
+const CODEX_USAGE_SOURCE = (
+  process.env.CODEX_USAGE_SOURCE ||
+  'cli'
+).toLowerCase()
+
 const SESSIONS_DIRECTORY = path.join(CODEX_HOME, 'sessions')
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CODEX_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-latest.json')
@@ -28,48 +33,11 @@ try {
 }
 
 function readCodexUsage() {
-  const sessionFile = findLatestSessionFile(SESSIONS_DIRECTORY)
-
-  if (!sessionFile) {
-    throw new Error(`No Codex session files found in ${SESSIONS_DIRECTORY}`)
-  }
-
-  const lines = fs.readFileSync(sessionFile, 'utf8')
-    .split(/\r?\n/)
-    .filter(Boolean)
-
-  let sessionMeta = null
-  let turnContext = null
-  let tokenCount = null
-
-  for (const line of lines) {
-    const event = parseJsonLine(line)
-    if (!event) {
-      continue
-    }
-
-    if (event.type === 'session_meta') {
-      sessionMeta = event.payload || sessionMeta
-      continue
-    }
-
-    if (event.type === 'turn_context') {
-      turnContext = event.payload || turnContext
-      continue
-    }
-
-    if (
-      event.type === 'event_msg' &&
-      event.payload &&
-      event.payload.type === 'token_count'
-    ) {
-      tokenCount = event
-    }
-  }
-
-  if (!tokenCount) {
-    throw new Error(`No token_count event found in ${sessionFile}`)
-  }
+  const usageSession = findLatestUsageSession(SESSIONS_DIRECTORY)
+  const sessionFile = usageSession.sessionFile
+  const sessionMeta = usageSession.sessionMeta
+  const turnContext = usageSession.turnContext
+  const tokenCount = usageSession.tokenCount
 
   const payload = tokenCount.payload || {}
   const info = payload.info || {}
@@ -96,6 +64,7 @@ function readCodexUsage() {
   return {
     generated_at: new Date().toISOString(),
     source: 'codex-session-jsonl',
+    source_filter: CODEX_USAGE_SOURCE,
     source_file: sessionFile,
     session: {
       id: nullableString(sessionMeta && (sessionMeta.session_id || sessionMeta.id)),
@@ -161,24 +130,110 @@ function readCodexUsage() {
   }
 }
 
-function findLatestSessionFile(root) {
+function findLatestUsageSession(root) {
+  const files = [...walkFiles(root)]
+    .filter(file => file.endsWith('.jsonl'))
+    .map(file => ({
+      file,
+      mtimeMs: fs.statSync(file).mtimeMs
+    }))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, 80)
+
   let latest = null
 
-  for (const file of walkFiles(root)) {
-    if (!file.endsWith('.jsonl')) {
+  for (const item of files) {
+    const parsed = readUsageSessionFile(item.file)
+
+    if (!parsed || !parsed.tokenCount) {
       continue
     }
 
-    const stat = fs.statSync(file)
-    if (!latest || stat.mtimeMs > latest.mtimeMs) {
+    if (!matchesSourceFilter(parsed.sessionMeta)) {
+      continue
+    }
+
+    const tokenTime = Date.parse(parsed.tokenCount.timestamp || '') || item.mtimeMs
+
+    if (!latest || tokenTime > latest.tokenTime) {
       latest = {
-        file,
-        mtimeMs: stat.mtimeMs
+        ...parsed,
+        sessionFile: item.file,
+        tokenTime
       }
     }
   }
 
-  return latest && latest.file
+  if (!latest) {
+    throw new Error(
+      `No ${CODEX_USAGE_SOURCE} token_count event found in ${root}`
+    )
+  }
+
+  return latest
+}
+
+function readUsageSessionFile(sessionFile) {
+  const lines = fs.readFileSync(sessionFile, 'utf8')
+    .split(/\r?\n/)
+    .filter(Boolean)
+
+  let sessionMeta = null
+  let turnContext = null
+  let tokenCount = null
+
+  for (const line of lines) {
+    const event = parseJsonLine(line)
+    if (!event) {
+      continue
+    }
+
+    if (event.type === 'session_meta') {
+      sessionMeta = event.payload || sessionMeta
+      continue
+    }
+
+    if (event.type === 'turn_context') {
+      turnContext = event.payload || turnContext
+      continue
+    }
+
+    if (
+      event.type === 'event_msg' &&
+      event.payload &&
+      event.payload.type === 'token_count'
+    ) {
+      tokenCount = event
+    }
+  }
+
+  return {
+    sessionMeta,
+    turnContext,
+    tokenCount
+  }
+}
+
+function matchesSourceFilter(sessionMeta) {
+  if (CODEX_USAGE_SOURCE === 'any' || CODEX_USAGE_SOURCE === 'all') {
+    return true
+  }
+
+  const source = nullableString(sessionMeta && sessionMeta.source)
+    ?.toLowerCase()
+
+  const originator = nullableString(sessionMeta && sessionMeta.originator)
+    ?.toLowerCase()
+
+  if (CODEX_USAGE_SOURCE === 'cli') {
+    return source === 'cli' || originator === 'codex-tui'
+  }
+
+  if (CODEX_USAGE_SOURCE === 'desktop') {
+    return source === 'vscode' || (originator || '').includes('desktop')
+  }
+
+  return source === CODEX_USAGE_SOURCE || originator === CODEX_USAGE_SOURCE
 }
 
 function* walkFiles(directory) {

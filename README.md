@@ -148,6 +148,20 @@ C:\Users\user\.codex\sessions\...\*.jsonl
 event_msg / token_count
 ```
 
+預設只讀 Codex CLI session：
+
+```text
+CODEX_USAGE_SOURCE=cli
+```
+
+這可以避免 Codex Desktop 目前任務的 session 覆蓋你在 CMD 裡開的 `codex` usage。可選值：
+
+```text
+cli      只讀 codex-tui / Codex CLI
+desktop  只讀 Codex Desktop
+any      不分來源，讀最新 token_count
+```
+
 重要欄位：
 
 ```json
