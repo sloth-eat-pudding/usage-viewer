@@ -2,4 +2,5 @@
 setlocal
 set CODEX_USAGE_SOURCE=any
 node "%~dp0codex-usage-read.js"
-pause
+echo.
+codex %*

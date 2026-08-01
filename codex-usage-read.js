@@ -12,7 +12,7 @@ const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
 
 const CODEX_USAGE_SOURCE = (
   process.env.CODEX_USAGE_SOURCE ||
-  'cli'
+  'any'
 ).toLowerCase()
 
 const SESSIONS_DIRECTORY = path.join(CODEX_HOME, 'sessions')

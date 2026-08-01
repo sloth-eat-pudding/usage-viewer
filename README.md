@@ -25,6 +25,7 @@ start-overlay.vbs             隱藏 console 啟動 overlay
 start-codex-overlay.cmd        啟動 Codex reader + overlay
 start-codex-reader.cmd         只啟動 Codex reader
 show-codex-usage.cmd           顯示一次 Codex CLI 細節
+codex-with-usage.cmd           先顯示 Codex usage，再啟動 codex
 stop-codex-reader.cmd          停止背景 Codex reader
 settings.json                 Claude Code 設定範例
 ```
@@ -108,6 +109,18 @@ node .\codex-usage-read.js
 C:\Users\user\Documents\usage_viewer\show-codex-usage.cmd
 ```
 
+如果想在進入 Codex CLI 前先看到 usage：
+
+```cmd
+C:\Users\user\Documents\usage_viewer\codex-with-usage.cmd
+```
+
+也可以帶參數，例如：
+
+```cmd
+C:\Users\user\Documents\usage_viewer\codex-with-usage.cmd --cd C:\Users\user\Documents\usage_viewer
+```
+
 ## Overlay 操作
 
 - 左鍵拖曳內容區：移動視窗
@@ -148,13 +161,13 @@ C:\Users\user\.codex\sessions\...\*.jsonl
 event_msg / token_count
 ```
 
-預設只讀 Codex CLI session：
+預設讀全部 Codex session 的最新 usage，也就是總 usage：
 
 ```text
-CODEX_USAGE_SOURCE=cli
+CODEX_USAGE_SOURCE=any
 ```
 
-這可以避免 Codex Desktop 目前任務的 session 覆蓋你在 CMD 裡開的 `codex` usage。可選值：
+可選值：
 
 ```text
 cli      只讀 codex-tui / Codex CLI
