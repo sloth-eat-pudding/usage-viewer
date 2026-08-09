@@ -10,19 +10,21 @@ const CODEX_HOME = process.env.CODEX_HOME ||
 const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
 
-const CODEX_USAGE_SOURCE = (
-  process.env.CODEX_USAGE_SOURCE ||
-  'any'
-).toLowerCase()
-
 const SESSIONS_DIRECTORY = path.join(CODEX_HOME, 'sessions')
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CODEX_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-latest.json')
+const CODEX_APP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-app-latest.json')
+const CODEX_DESKTOP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-desktop-latest.json')
+const CODEX_CLI_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-cli-latest.json')
 const HISTORY_FILE = path.join(USAGE_VIEWER_HOME, 'codex-history.jsonl')
 
 try {
-  const snapshot = readCodexUsage()
+  const snapshots = readCodexUsageByMode()
+  const snapshot = snapshots.selected
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
+  if (snapshots.desktop) writeJsonAtomic(CODEX_DESKTOP_LATEST_FILE, snapshots.desktop)
+  if (snapshots.cli) writeJsonAtomic(CODEX_CLI_LATEST_FILE, snapshots.cli)
+  writeJsonAtomic(CODEX_APP_LATEST_FILE, snapshot)
   writeJsonAtomic(CODEX_LATEST_FILE, snapshot)
   writeJsonAtomic(LATEST_FILE, snapshot)
   fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
@@ -32,9 +34,31 @@ try {
   process.exitCode = 1
 }
 
-function readCodexUsage() {
-  const usageSession = findLatestUsageSession(SESSIONS_DIRECTORY)
+function readCodexUsageByMode() {
+  const usageSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
+  const desktop = usageSessions.desktop
+    ? buildCodexSnapshot(usageSessions.desktop, 'desktop')
+    : null
+  const cli = usageSessions.cli
+    ? buildCodexSnapshot(usageSessions.cli, 'cli')
+    : null
+  const available = [desktop, cli].filter(Boolean)
+
+  if (available.length === 0) {
+    throw new Error(`No direct Codex rate-limit usage found in ${SESSIONS_DIRECTORY}`)
+  }
+
+  return {
+    desktop,
+    cli,
+    selected: available.sort((left, right) =>
+      Date.parse(right.observed_at) - Date.parse(left.observed_at))[0]
+  }
+}
+
+function buildCodexSnapshot(usageSession, sourceMode) {
   const sessionFile = usageSession.sessionFile
+  const sourceFileMtime = new Date(usageSession.mtimeMs).toISOString()
   const sessionMeta = usageSession.sessionMeta
   const turnContext = usageSession.turnContext
   const tokenCount = usageSession.tokenCount
@@ -45,16 +69,11 @@ function readCodexUsage() {
   const totalUsage = info.total_token_usage || {}
   const rateLimits = payload.rate_limits || {}
   const primaryLimit = rateLimits.primary || {}
-  const modelContextWindow = toNumber(info.model_context_window)
   const lastTotalTokens = toNumber(lastUsage.total_tokens)
-  const contextUsed = modelContextWindow > 0
-    ? (lastTotalTokens / modelContextWindow) * 100
-    : null
-
   const primaryUsed = nullableNumber(primaryLimit.used_percent)
   const primaryWindowMinutes = nullableNumber(primaryLimit.window_minutes)
-  const isSevenDayWindow = primaryWindowMinutes === 10080
-  const isFiveHourWindow = primaryWindowMinutes === 300
+  const fiveHourLimit = findRateLimitWindow(rateLimits, 300)
+  const sevenDayLimit = findRateLimitWindow(rateLimits, 10080)
 
   const inputTokens = toNumber(lastUsage.input_tokens)
   const cachedInputTokens = toNumber(lastUsage.cached_input_tokens)
@@ -65,9 +84,10 @@ function readCodexUsage() {
     generated_at: new Date().toISOString(),
     // The reader may run while Codex is appending to the session file. Keep
     // the source event time separate from the time this snapshot was written.
-    observed_at: nullableString(tokenCount.timestamp),
-    source: 'codex-session-jsonl',
-    source_filter: CODEX_USAGE_SOURCE,
+    observed_at: nullableString(tokenCount.timestamp) || sourceFileMtime,
+    source_file_mtime: sourceFileMtime,
+    source: 'codex-session-rate-limits',
+    source_mode: sourceMode,
     source_file: sessionFile,
     session: {
       id: nullableString(sessionMeta && (sessionMeta.session_id || sessionMeta.id)),
@@ -105,11 +125,11 @@ function readCodexUsage() {
       session_total: toNumber(totalUsage.total_tokens)
     },
     percentages: {
-      context_used: contextUsed,
-      context_remaining: contextUsed === null ? null : Math.max(0, 100 - contextUsed),
+      context_used: null,
+      context_remaining: null,
       cached_input: inputTokens > 0 ? (cachedInputTokens / inputTokens) * 100 : 0,
-      five_hour_used: isFiveHourWindow ? primaryUsed : null,
-      seven_day_used: isSevenDayWindow ? primaryUsed : null,
+      five_hour_used: nullableNumber(fiveHourLimit.used_percent),
+      seven_day_used: nullableNumber(sevenDayLimit.used_percent),
       primary_limit_used: primaryUsed
     },
     cost: {
@@ -117,23 +137,17 @@ function readCodexUsage() {
       turn_usd: 0
     },
     rate_limits: {
-      primary: {
-        used_percent: primaryUsed,
-        window_minutes: primaryWindowMinutes,
-        resets_at_epoch_seconds: nullableNumber(primaryLimit.resets_at)
-      },
+      primary_window_minutes: primaryWindowMinutes,
       plan_type: nullableString(rateLimits.plan_type),
-      limit_id: nullableString(rateLimits.limit_id),
-      rate_limit_reached_type: nullableString(rateLimits.rate_limit_reached_type)
     },
     resets_at: {
-      five_hour_epoch_seconds: isFiveHourWindow ? nullableNumber(primaryLimit.resets_at) : null,
-      seven_day_epoch_seconds: isSevenDayWindow ? nullableNumber(primaryLimit.resets_at) : null
+      five_hour_epoch_seconds: nullableNumber(fiveHourLimit.resets_at),
+      seven_day_epoch_seconds: nullableNumber(sevenDayLimit.resets_at)
     }
   }
 }
 
-function findLatestUsageSession(root) {
+function findLatestUsageSessionsByMode(root) {
   const files = [...walkFiles(root)]
     .filter(file => file.endsWith('.jsonl'))
     .map(file => ({
@@ -143,7 +157,7 @@ function findLatestUsageSession(root) {
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
     .slice(0, 80)
 
-  let latest = null
+  const latestByMode = {}
 
   for (const item of files) {
     const parsed = readUsageSessionFile(item.file)
@@ -152,28 +166,26 @@ function findLatestUsageSession(root) {
       continue
     }
 
-    if (!matchesSourceFilter(parsed.sessionMeta)) {
+    const mode = classifySourceMode(parsed.sessionMeta)
+    if (!mode) {
       continue
     }
 
     const tokenTime = Date.parse(parsed.tokenCount.timestamp || '') || item.mtimeMs
 
-    if (!latest || tokenTime > latest.tokenTime) {
-      latest = {
+    if (!latestByMode[mode] || tokenTime > latestByMode[mode].tokenTime) {
+      latestByMode[mode] = {
         ...parsed,
         sessionFile: item.file,
+        mtimeMs: item.mtimeMs,
         tokenTime
       }
     }
+
+    if (latestByMode.desktop && latestByMode.cli) break
   }
 
-  if (!latest) {
-    throw new Error(
-      `No ${CODEX_USAGE_SOURCE} token_count event found in ${root}`
-    )
-  }
-
-  return latest
+  return latestByMode
 }
 
 function readUsageSessionFile(sessionFile) {
@@ -204,7 +216,8 @@ function readUsageSessionFile(sessionFile) {
     if (
       event.type === 'event_msg' &&
       event.payload &&
-      event.payload.type === 'token_count'
+      event.payload.type === 'token_count' &&
+      hasDirectRateLimitUsage(event)
     ) {
       tokenCount = event
     }
@@ -217,26 +230,42 @@ function readUsageSessionFile(sessionFile) {
   }
 }
 
-function matchesSourceFilter(sessionMeta) {
-  if (CODEX_USAGE_SOURCE === 'any' || CODEX_USAGE_SOURCE === 'all') {
-    return true
-  }
-
+function classifySourceMode(sessionMeta) {
   const source = nullableString(sessionMeta && sessionMeta.source)
     ?.toLowerCase()
-
   const originator = nullableString(sessionMeta && sessionMeta.originator)
     ?.toLowerCase()
 
-  if (CODEX_USAGE_SOURCE === 'cli') {
-    return source === 'cli' || originator === 'codex-tui'
+  if (
+    (originator || '').includes('desktop') ||
+    (originator || '').includes('codex_vscode') ||
+    source === 'vscode' ||
+    source === 'codex_vscode'
+  ) {
+    return 'desktop'
   }
 
-  if (CODEX_USAGE_SOURCE === 'desktop') {
-    return source === 'vscode' || (originator || '').includes('desktop')
+  if (source === 'cli' || (originator || '').includes('codex-tui')) {
+    return 'cli'
   }
 
-  return source === CODEX_USAGE_SOURCE || originator === CODEX_USAGE_SOURCE
+  return null
+}
+
+function hasDirectRateLimitUsage(event) {
+  const rateLimits = event && event.payload && event.payload.rate_limits
+  return ['primary', 'secondary'].some(name =>
+    nullableNumber(rateLimits && rateLimits[name] && rateLimits[name].used_percent) !== null)
+}
+
+function findRateLimitWindow(rateLimits, windowMinutes) {
+  for (const name of ['primary', 'secondary']) {
+    const limit = rateLimits && rateLimits[name]
+    if (nullableNumber(limit && limit.window_minutes) === windowMinutes) {
+      return limit
+    }
+  }
+  return {}
 }
 
 function* walkFiles(directory) {
@@ -327,14 +356,10 @@ function nullableString(value) {
 }
 
 function formatSummary(snapshot) {
-  const week = snapshot.percentages.seven_day_used
-  const primary = snapshot.percentages.primary_limit_used
-  const limit = week === null ? primary : week
-  const limitName = week === null ? 'limit' : 'week'
-
   return [
-    `Codex ${limitName}: ${limit === null ? '?' : `${limit.toFixed(2)}%`}`,
-    `Context: ${snapshot.percentages.context_used === null ? '?' : `${snapshot.percentages.context_used.toFixed(1)}%`}`,
+    `Codex source: ${snapshot.source_mode}`,
+    `7d: ${formatPercent(snapshot.percentages.seven_day_used)}`,
+    `5h: ${formatPercent(snapshot.percentages.five_hour_used)}`,
     `Input: ${formatInteger(snapshot.tokens.total_input)}`,
     `Cached input: ${formatInteger(snapshot.tokens.cache_read_input)} (${snapshot.percentages.cached_input.toFixed(1)}%)`,
     `New input: ${formatInteger(snapshot.tokens.new_input)}`,
@@ -342,10 +367,16 @@ function formatSummary(snapshot) {
     `Reasoning output: ${formatInteger(snapshot.tokens.reasoning_output)}`,
     `Session total: ${formatInteger(snapshot.tokens.session_total)}`,
     `Plan: ${snapshot.rate_limits.plan_type || '?'}`,
-    `Window minutes: ${snapshot.rate_limits.primary.window_minutes || '?'}`,
-    `Reset: ${formatEpoch(snapshot.rate_limits.primary.resets_at_epoch_seconds)}`,
+    `Primary window minutes: ${snapshot.rate_limits.primary_window_minutes || '?'}`,
+    `7d reset: ${formatEpoch(snapshot.resets_at.seven_day_epoch_seconds)}`,
+    `5h reset: ${formatEpoch(snapshot.resets_at.five_hour_epoch_seconds)}`,
     `Source: ${snapshot.source_file}`
   ].join('\n') + '\n'
+}
+
+function formatPercent(value) {
+  const number = nullableNumber(value)
+  return number === null ? '?' : `${number.toFixed(2)}%`
 }
 
 function formatInteger(value) {

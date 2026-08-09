@@ -1,8 +1,8 @@
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
-scriptPath = folder & "\claude-desktop-usage-read.js"
-lockPath = shell.ExpandEnvironmentStrings("%TEMP%") & "\usage-viewer-claude-reader.lock"
+scriptPath = fso.GetParentFolderName(folder) & "\src\readers\codex-usage-read.js"
+lockPath = shell.ExpandEnvironmentStrings("%TEMP%") & "\usage-viewer-codex-reader.lock"
 
 If fso.FolderExists(lockPath) Then
   On Error Resume Next

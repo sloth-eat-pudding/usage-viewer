@@ -1,8 +1,8 @@
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
-scriptPath = folder & "\codex-usage-read.js"
-lockPath = shell.ExpandEnvironmentStrings("%TEMP%") & "\usage-viewer-codex-reader.lock"
+scriptPath = fso.GetParentFolderName(folder) & "\src\readers\claude-desktop-usage-read.js"
+lockPath = shell.ExpandEnvironmentStrings("%TEMP%") & "\usage-viewer-claude-reader.lock"
 
 If fso.FolderExists(lockPath) Then
   On Error Resume Next
@@ -34,7 +34,7 @@ Do
   heartbeat.Close
   On Error GoTo 0
 
-  command = "cmd.exe /c set CODEX_USAGE_SOURCE=any&& node " & Chr(34) & scriptPath & Chr(34) & " >nul 2>nul"
+  command = "cmd.exe /c node " & Chr(34) & scriptPath & Chr(34) & " >nul 2>nul"
   shell.Run command, 0, True
   WScript.Sleep 2000
 Loop

@@ -80,11 +80,11 @@ if ([string]::IsNullOrWhiteSpace($usageHome)) {
 
 $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-$windowIconPath = Join-Path $scriptDirectory "assets\usage-viewer.ico"
-$claudeUsageFile = Join-Path $usageHome "claude-latest.json"
-$codexUsageFile = Join-Path $usageHome "codex-latest.json"
+$windowIconPath = Join-Path $scriptDirectory "..\..\assets\usage-viewer.ico"
+$claudeUsageFile = Join-Path $usageHome "claude-app-latest.json"
+$codexUsageFile = Join-Path $usageHome "codex-app-latest.json"
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
-$defaultWindowSize = New-Object System.Drawing.Size(440, 112)
+$defaultWindowSize = New-Object System.Drawing.Size(260, 68)
 
 [OverlayWindowInterop]::SetCurrentProcessExplicitAppUserModelID("SlothEatPudding.UsageViewer") | Out-Null
 
@@ -102,31 +102,32 @@ if (Test-Path -LiteralPath $windowIconPath) {
   }
 }
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
-$form.MinimumSize = New-Object System.Drawing.Size(360, 104)
+$form.MinimumSize = New-Object System.Drawing.Size(180, 56)
 $form.TopMost = $true
 $form.ShowIcon = $true
 $form.ShowInTaskbar = $true
 $form.BackColor = [System.Drawing.Color]::FromArgb(1, 2, 3)
 $form.TransparencyKey = $form.BackColor
-$form.Opacity = 0.92
+$form.Opacity = 0.91
 
 $panel = New-Object System.Windows.Forms.Panel
 $panel.Dock = [System.Windows.Forms.DockStyle]::Fill
-$panel.BackColor = [System.Drawing.Color]::FromArgb(28, 32, 38)
+$panel.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $form.Controls.Add($panel)
 
 $resetButton = New-Object System.Windows.Forms.Button
 $resetButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $resetButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $resetButton.FlatAppearance.BorderSize = 0
-$resetButton.BackColor = [System.Drawing.Color]::FromArgb(28, 32, 38)
-$resetButton.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
-$resetButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$resetButton.Location = New-Object System.Drawing.Point(394, 6)
-$resetButton.Size = New-Object System.Drawing.Size(28, 24)
+$resetButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
+$resetButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
+$resetButton.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
+$resetButton.Location = New-Object System.Drawing.Point(216, 2)
+$resetButton.Size = New-Object System.Drawing.Size(20, 20)
 $resetButton.Text = "R"
 $resetButton.TabStop = $false
 $resetButton.Add_Click({
@@ -134,6 +135,7 @@ $resetButton.Add_Click({
   $script:showCost = $false
   $script:heightBeforeCostExpand = $null
   Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+  Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
 })
 $panel.Controls.Add($resetButton)
 
@@ -141,11 +143,11 @@ $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $closeButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $closeButton.FlatAppearance.BorderSize = 0
-$closeButton.BackColor = [System.Drawing.Color]::FromArgb(28, 32, 38)
-$closeButton.ForeColor = [System.Drawing.Color]::FromArgb(220, 226, 232)
-$closeButton.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$closeButton.Location = New-Object System.Drawing.Point(426, 6)
-$closeButton.Size = New-Object System.Drawing.Size(28, 24)
+$closeButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
+$closeButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
+$closeButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
+$closeButton.Location = New-Object System.Drawing.Point(238, 2)
+$closeButton.Size = New-Object System.Drawing.Size(20, 20)
 $closeButton.Text = "X"
 $closeButton.TabStop = $false
 $closeButton.Add_Click({ $form.Close() })
@@ -163,19 +165,19 @@ $panel.Controls.Add($title)
 
 $main = New-Object System.Windows.Forms.Label
 $main.AutoSize = $false
-$main.Location = New-Object System.Drawing.Point(14, 12)
-$main.Size = New-Object System.Drawing.Size(392, 48)
-$main.Font = New-Object System.Drawing.Font("Cascadia Mono", 15, [System.Drawing.FontStyle]::Bold)
-$main.ForeColor = [System.Drawing.Color]::FromArgb(126, 231, 180)
+$main.Location = New-Object System.Drawing.Point(7, 4)
+$main.Size = New-Object System.Drawing.Size(246, 34)
+$main.Font = New-Object System.Drawing.Font("Segoe UI", 10.5, [System.Drawing.FontStyle]::Bold)
+$main.ForeColor = [System.Drawing.Color]::White
 $main.Text = "Waiting for usage..."
 $panel.Controls.Add($main)
 
 $detail = New-Object System.Windows.Forms.Label
 $detail.AutoSize = $false
-$detail.Location = New-Object System.Drawing.Point(14, 62)
-$detail.Size = New-Object System.Drawing.Size(392, 36)
-$detail.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Drawing.FontStyle]::Regular)
-$detail.ForeColor = [System.Drawing.Color]::White
+$detail.Location = New-Object System.Drawing.Point(7, 39)
+$detail.Size = New-Object System.Drawing.Size(246, 25)
+$detail.Font = New-Object System.Drawing.Font("Segoe UI", 8.25, [System.Drawing.FontStyle]::Regular)
+$detail.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $detail.Text = $UsageFile
 $detail.Visible = $true
 $panel.Controls.Add($detail)
@@ -195,11 +197,11 @@ $script:showCost = $false
 $script:heightBeforeCostExpand = $null
 
 $layoutOverlay = {
-  $width = [Math]::Max(80, $panel.ClientSize.Width - 28)
+  $width = [Math]::Max(80, $panel.ClientSize.Width - 13)
   $main.Width = $width
   $detail.Width = $width
-  $resetButton.Left = $panel.ClientSize.Width - 66
-  $closeButton.Left = $panel.ClientSize.Width - 34
+  $resetButton.Left = $panel.ClientSize.Width - 44
+  $closeButton.Left = $panel.ClientSize.Width - 22
 }
 
 $form.Add_Resize($layoutOverlay)
@@ -371,7 +373,7 @@ function Update-UsageView {
 
     $Title.Text = ""
     $Main.Text = Format-ClaudeUsageLine $json
-    $Detail.Text = "Claude $age reset $reset"
+    $Detail.Text = "Claude  $reset | $age"
     $CostToggle.Text = ""
   } catch {
     $Title.Text = ""
@@ -411,43 +413,26 @@ function Update-CombinedUsageView {
   }
 
   $codexLine = if ($null -eq $codex) {
-    "Codex ?%"
+    "Codex   usage unavailable"
   } else {
-    $codexLimit = Format-Percent $codex.percentages.seven_day_used 2
-    if ($codexLimit -eq "?") {
-      $codexLimit = Format-Percent $codex.percentages.primary_limit_used 2
-    }
-
-    "Codex $codexLimit"
+    Format-CodexUsageLine $codex
   }
 
-  $Main.Text = "$codexLine`r`n$claudeLine"
+  $Main.Text = "$claudeLine`r`n$codexLine"
 
   $codexTimeLine = if ($null -eq $codex) {
-    "Codex ? reset ?"
+    "Codex   waiting"
   } else {
-    "Codex $(Format-Age (Get-UsageTimestamp $codex)) - $(Format-ResetSummary $codex)"
+    "Codex   $(Format-ResetSummary $codex) | $(Format-Age (Get-UsageTimestamp $codex))  $(Get-CodexSourceSuffix $codex)"
   }
 
   $claudeTimeLine = if ($null -eq $claude) {
-    "Claude ? reset ?"
+    "Claude  waiting"
   } else {
-    "Claude $(Format-Age (Get-UsageTimestamp $claude)) - $(Format-ResetSummary $claude)"
+    "Claude  $(Format-ResetSummary $claude) | $(Format-Age (Get-UsageTimestamp $claude))"
   }
 
-  $claudeDetail = if ($null -eq $claude) {
-    "Claude waiting"
-  } else {
-    "Claude ctx $(Format-Percent $claude.percentages.context_used 1) in $(Format-Count $claude.tokens.total_input) out $(Format-Count $claude.tokens.output)"
-  }
-
-  $codexDetail = if ($null -eq $codex) {
-    "Codex waiting"
-  } else {
-    "Codex  ctx $(Format-Percent $codex.percentages.context_used 1) in $(Format-Count $codex.tokens.total_input) out $(Format-Count $codex.tokens.output)"
-  }
-
-  $Detail.Text = "$codexTimeLine`r`n$claudeTimeLine"
+  $Detail.Text = "$claudeTimeLine`r`n$codexTimeLine"
   $CostToggle.Text = ""
 }
 
@@ -459,43 +444,48 @@ function Resize-OverlayToContent {
     [System.Windows.Forms.Label]$Detail
   )
 
-  $mainWidth = Measure-MultilineTextWidth -Text $Main.Text -Font $Main.Font
-  $detailWidth = Measure-MultilineTextWidth -Text $Detail.Text -Font $Detail.Font
+  $mainSize = Measure-MultilineTextSize -Text $Main.Text -Font $Main.Font
+  $detailSize = Measure-MultilineTextSize -Text $Detail.Text -Font $Detail.Font
+  $left = 7
+  $top = 4
+  $gap = 1
+  $right = 6
+  $bottom = 4
+  $buttonArea = 46
 
-  $desiredWidth = [Math]::Max(
-    $Form.MinimumSize.Width,
-    ([Math]::Max($mainWidth, $detailWidth) + 34)
-  )
+  $contentWidth = [Math]::Max($mainSize.Width + $buttonArea, $detailSize.Width)
+  $desiredWidth = [Math]::Min(760, [Math]::Max($Form.MinimumSize.Width, $left + $contentWidth + $right))
+  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, $top + $mainSize.Height + $gap + $detailSize.Height + $bottom)
 
-  $desiredWidth = [Math]::Min(760, $desiredWidth)
-
-  if ([Math]::Abs($Form.Width - $desiredWidth) -gt 8) {
-    $Form.Width = $desiredWidth
-  }
-
-  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, 112)
-
-  if ([Math]::Abs($Form.Height - $desiredHeight) -gt 6) {
-    $Form.Height = $desiredHeight
-  }
+  $Form.ClientSize = [System.Drawing.Size]::new([int]$desiredWidth, [int]$desiredHeight)
+  $Main.Location = [System.Drawing.Point]::new($left, $top)
+  $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $mainSize.Height)
+  $Detail.Location = [System.Drawing.Point]::new($left, $top + $mainSize.Height + $gap)
+  $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $detailSize.Height)
 }
 
-function Measure-MultilineTextWidth {
+function Measure-MultilineTextSize {
   param(
     [string]$Text,
     [System.Drawing.Font]$Font
   )
 
+  if ([string]::IsNullOrEmpty([string]$Text)) {
+    return [System.Drawing.Size]::Empty
+  }
+
+  $lines = @([string]$Text -split "`r?`n")
   $maxWidth = 0
 
-  foreach ($line in ([string]$Text -split "`r?`n")) {
+  foreach ($line in $lines) {
     $maxWidth = [Math]::Max(
       $maxWidth,
       (Measure-TextWidth -Text $line -Font $Font)
     )
   }
 
-  return $maxWidth
+  $lineHeight = [System.Windows.Forms.TextRenderer]::MeasureText("Ag", $Font).Height
+  return [System.Drawing.Size]::new([int]$maxWidth, [int]($lineHeight * $lines.Count))
 }
 
 function Measure-TextWidth {
@@ -583,14 +573,41 @@ function Format-CompactCount {
 function Format-ClaudeUsageLine {
   param($Claude)
 
-  $week = Format-Percent $Claude.percentages.seven_day_used 2
-  $fiveHour = Format-Percent $Claude.percentages.five_hour_used 2
+  $week = Format-UsagePercent $Claude.percentages.seven_day_used
+  $fiveHour = Format-UsagePercent $Claude.percentages.five_hour_used
 
   if ($week -ne "?" -or $fiveHour -ne "?") {
-    return "Claude $week $fiveHour"
+    return "Claude  7d $week  |  5h $fiveHour"
   }
 
   return "Claude in $(Format-CompactCount $Claude.tokens.total_input) out $(Format-CompactCount $Claude.tokens.output)"
+}
+
+function Format-CodexUsageLine {
+  param($Codex)
+
+  $parts = @()
+  $week = Format-UsagePercent $Codex.percentages.seven_day_used
+  $fiveHour = Format-UsagePercent $Codex.percentages.five_hour_used
+  if ($week -ne "?") { $parts += "7d $week" }
+  if ($fiveHour -ne "?") { $parts += "5h $fiveHour" }
+  if ($parts.Count -eq 0) { return "Codex   usage unavailable" }
+  return "Codex   $($parts -join '  |  ')"
+}
+
+function Get-CodexSourceSuffix {
+  param($Codex)
+
+  if ($Codex.source_mode -eq "cli") { return "(C)" }
+  if ($Codex.source_mode -eq "desktop") { return "(D)" }
+  return ""
+}
+
+function Format-UsagePercent {
+  param($Value)
+
+  if ($null -eq $Value) { return "?" }
+  return "$(([double]$Value).ToString("0.##", [Globalization.CultureInfo]::InvariantCulture))%"
 }
 
 function Format-Usd {
@@ -671,19 +688,11 @@ function Format-ResetSummary {
 
   $fiveHour = Format-ResetTime (Get-ResetEpochByName $Json "five_hour")
   $week = Format-ResetWeekdayTime (Get-ResetEpochByName $Json "seven_day")
-
-  if ($week -ne "?") {
-    if ($fiveHour -ne "?") {
-      return "$week / 5h $fiveHour"
-    }
-    return $week
-  }
-
-  if ($fiveHour -ne "?") {
-    return "5h $fiveHour"
-  }
-
-  return Format-Reset (Get-ResetEpoch $Json)
+  $parts = @()
+  if ($week -ne "?") { $parts += $week }
+  if ($fiveHour -ne "?") { $parts += $fiveHour }
+  if ($parts.Count -gt 0) { return $parts -join " | " }
+  return "?"
 }
 
 function Format-ResetTime {
@@ -694,7 +703,7 @@ function Format-ResetTime {
   }
 
   try {
-    return [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime().ToString("HH:mm")
+    return [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime().ToString("HH:mm", [Globalization.CultureInfo]::InvariantCulture)
   } catch {
     return "?"
   }
@@ -709,29 +718,7 @@ function Format-ResetWeekdayTime {
 
   try {
     $local = [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime()
-    $weekPrefix = [string][char]0x9031
-    $weekdayNames = @(
-      "$weekPrefix$([char]0x65E5)",
-      "$weekPrefix$([char]0x4E00)",
-      "$weekPrefix$([char]0x4E8C)",
-      "$weekPrefix$([char]0x4E09)",
-      "$weekPrefix$([char]0x56DB)",
-      "$weekPrefix$([char]0x4E94)",
-      "$weekPrefix$([char]0x516D)"
-    )
-    $weekday = $weekdayNames[[int]$local.DayOfWeek]
-    $weekPrefix = [string][char]0x9031
-    $weekdayNames = @(
-      "$weekPrefix$([char]0x65E5)",
-      "$weekPrefix$([char]0x4E00)",
-      "$weekPrefix$([char]0x4E8C)",
-      "$weekPrefix$([char]0x4E09)",
-      "$weekPrefix$([char]0x56DB)",
-      "$weekPrefix$([char]0x4E94)",
-      "$weekPrefix$([char]0x516D)"
-    )
-    $weekday = $weekdayNames[[int]$local.DayOfWeek]
-    return "$weekday $($local.ToString("HH:mm"))"
+    return $local.ToString("ddd HH:mm", [Globalization.CultureInfo]::InvariantCulture)
   } catch {
     return "?"
   }

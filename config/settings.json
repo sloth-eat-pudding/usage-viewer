@@ -6,7 +6,7 @@
   "model": "opus[1m]",
   "statusLine": {
     "type": "command",
-    "command": "node \"C:\\Users\\user\\Documents\\usage_viewer\\statusline-usage-capture.js\""
+    "command": "node \"C:\\Users\\user\\Documents\\usage_viewer\\src\\readers\\statusline-usage-capture.js\""
   },
   "effortLevel": "high",
   "autoUpdatesChannel": "latest",

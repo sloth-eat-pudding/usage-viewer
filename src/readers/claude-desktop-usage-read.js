@@ -26,6 +26,7 @@ const PLAN_USAGE_HISTORY_FILE = path.join(
 )
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CLAUDE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-latest.json')
+const CLAUDE_APP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-app-latest.json')
 const CLAUDE_STATUSLINE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-statusline-latest.json')
 const HISTORY_FILE = path.join(USAGE_VIEWER_HOME, 'history.jsonl')
 
@@ -33,6 +34,7 @@ try {
   const snapshot = readClaudeDesktopUsage()
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   writeJsonAtomic(CLAUDE_LATEST_FILE, snapshot)
+  writeJsonAtomic(CLAUDE_APP_LATEST_FILE, snapshot)
   writeJsonAtomic(LATEST_FILE, snapshot)
   fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
   process.stdout.write(formatSummary(snapshot))
@@ -49,6 +51,7 @@ function readClaudeDesktopUsage() {
   }
 
   const entry = latest.entry
+  const sourceFileMtime = new Date(latest.mtimeMs).toISOString()
   const message = entry.message || {}
   const usage = message.usage || {}
   const iterations = Array.isArray(usage.iterations) ? usage.iterations : []
@@ -89,7 +92,8 @@ function readClaudeDesktopUsage() {
 
   return {
     generated_at: new Date().toISOString(),
-    observed_at: nullableString(entry.timestamp),
+    observed_at: nullableString(entry.timestamp) || sourceFileMtime,
+    source_file_mtime: sourceFileMtime,
     source: 'claude-desktop-jsonl',
     source_file: latest.file,
     session: {
@@ -346,6 +350,7 @@ function findLatestUsage(root) {
     if (!latest || timestamp > latest.timestamp) {
       latest = {
         file: item.file,
+        mtimeMs: item.mtimeMs,
         timestamp,
         entry
       }

@@ -2,11 +2,14 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net7.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>..\..\assets\usage-viewer.ico</ApplicationIcon>
-    <AssemblyName>UsageViewer</AssemblyName>
-    <RootNamespace>UsageViewer</RootNamespace>
+    <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>usage-viewer.ico</ApplicationIcon>
+    <AssemblyName>UsageViewer</AssemblyName>
+    <RootNamespace>UsageViewer</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="usage-viewer.ico" />
+  </ItemGroup>
 </Project>
