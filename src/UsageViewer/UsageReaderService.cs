@@ -209,6 +209,7 @@ public sealed class UsageReaderService : IDisposable
         WriteJson("claude-app-latest.json", new {
             generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = observedAt.ToString("O"),
             source = useStatusLine ? "claude-code-statusline" : plan is null ? "claude-jsonl" : "claude-desktop-plan-usage-history",
+            source_mode = useStatusLine ? "cli" : "desktop",
             source_file = useStatusLine ? Path.Combine(_home, "claude-statusline-latest.json") : plan is null ? latest?.File : _claudePlanUsageHistory,
             tokens = new { total_input = input + cached, fresh_input = input, cache_read_input = cached, output },
             percentages = new {

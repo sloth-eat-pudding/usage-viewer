@@ -95,6 +95,7 @@ function readClaudeDesktopUsage() {
     observed_at: nullableString(entry.timestamp) || sourceFileMtime,
     source_file_mtime: sourceFileMtime,
     source: 'claude-desktop-jsonl',
+    source_mode: 'desktop',
     source_file: latest.file,
     session: {
       id: nullableString(entry.sessionId),

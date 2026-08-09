@@ -62,6 +62,7 @@ function buildSnapshot(data) {
   return {
     generated_at: new Date().toISOString(),
     source: 'claude-code-statusline',
+    source_mode: 'cli',
     session: {
       id: nullableString(data.session_id),
       name: nullableString(data.session_name),

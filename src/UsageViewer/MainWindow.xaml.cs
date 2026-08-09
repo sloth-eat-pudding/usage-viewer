@@ -94,6 +94,17 @@ public partial class MainWindow : Window
         return "";
     }
 
+    private static string ClaudeSourceSuffix(JsonElement? root)
+    {
+        if (root is null) return "";
+        if (root.Value.TryGetProperty("source_mode", out var mode) && mode.ValueKind == JsonValueKind.String)
+        {
+            return mode.GetString() == "cli" ? "(C)" : mode.GetString() == "desktop" ? "(D)" : "";
+        }
+        if (!root.Value.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.String) return "";
+        return source.GetString() == "claude-code-statusline" ? "(C)" : "(D)";
+    }
+
     private static string TokenUsage(JsonElement? root)
     {
         if (root is not null && root.Value.TryGetProperty("tokens", out var tokens))
@@ -144,7 +155,7 @@ public partial class MainWindow : Window
         var lines = new List<string>();
         var claudeDetails = ClaudeDetails(claude);
         var codexDetails = CodexDetails(codex);
-        if (!string.IsNullOrWhiteSpace(claudeDetails)) lines.Add($"Claude  {claudeDetails}");
+        if (!string.IsNullOrWhiteSpace(claudeDetails)) lines.Add($"Claude  {claudeDetails}  {ClaudeSourceSuffix(claude)}");
         if (!string.IsNullOrWhiteSpace(codexDetails)) lines.Add($"Codex   {codexDetails}  {CodexSourceSuffix(codex)}");
         return string.Join("\n", lines);
     }

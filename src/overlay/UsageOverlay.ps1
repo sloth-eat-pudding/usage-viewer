@@ -429,7 +429,7 @@ function Update-CombinedUsageView {
   $claudeTimeLine = if ($null -eq $claude) {
     "Claude  waiting"
   } else {
-    "Claude  $(Format-ResetSummary $claude) | $(Format-Age (Get-UsageTimestamp $claude))"
+    "Claude  $(Format-ResetSummary $claude) | $(Format-Age (Get-UsageTimestamp $claude))  $(Get-ClaudeSourceSuffix $claude)"
   }
 
   $Detail.Text = "$claudeTimeLine`r`n$codexTimeLine"
@@ -649,6 +649,16 @@ function Get-CodexSourceSuffix {
 
   if ($Codex.source_mode -eq "cli") { return "(C)" }
   if ($Codex.source_mode -eq "desktop") { return "(D)" }
+  return ""
+}
+
+function Get-ClaudeSourceSuffix {
+  param($Claude)
+
+  if ($Claude.source_mode -eq "cli") { return "(C)" }
+  if ($Claude.source_mode -eq "desktop") { return "(D)" }
+  if ($Claude.source -eq "claude-code-statusline") { return "(C)" }
+  if ($Claude.source) { return "(D)" }
   return ""
 }
 
