@@ -196,30 +196,34 @@ public sealed class UsageReaderService : IDisposable
         var input = Number(usage, "input_tokens");
         var cached = Number(usage, "cache_read_input_tokens");
         var output = Number(usage, "output_tokens");
-        var statusLineFiveHourReset = ReadReset("claude-statusline-latest.json", "five_hour_epoch_seconds");
-        var statusLineSevenDayReset = ReadReset("claude-statusline-latest.json", "seven_day_epoch_seconds");
-        var fiveHourReset = FirstFuture(statusLineFiveHourReset, plan?.EstimatedFiveHourReset);
-        var sevenDayReset = FirstFuture(statusLineSevenDayReset, plan?.EstimatedSevenDayReset);
-        var observedAt = plan?.ObservedAt ?? latest?.Time ?? DateTimeOffset.UtcNow;
+        var statusLine = ReadClaudeStatuslineUsage();
+        var useStatusLine = statusLine is not null && (plan is null || statusLine.ObservedAt > plan.ObservedAt);
+        var fiveHourUsed = useStatusLine ? statusLine?.FiveHourUsed ?? plan?.FiveHourUsed : plan?.FiveHourUsed;
+        var sevenDayUsed = useStatusLine ? statusLine?.SevenDayUsed ?? plan?.SevenDayUsed : plan?.SevenDayUsed;
+        var fiveHourReset = FirstFuture(statusLine?.FiveHourReset, plan?.EstimatedFiveHourReset);
+        var sevenDayReset = FirstFuture(statusLine?.SevenDayReset, plan?.EstimatedSevenDayReset);
+        var observedAt = useStatusLine
+            ? statusLine!.ObservedAt
+            : plan?.ObservedAt ?? latest?.Time ?? DateTimeOffset.UtcNow;
 
         WriteJson("claude-app-latest.json", new {
             generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = observedAt.ToString("O"),
-            source = plan is null ? "claude-jsonl" : "claude-desktop-plan-usage-history",
-            source_file = plan is null ? latest?.File : _claudePlanUsageHistory,
+            source = useStatusLine ? "claude-code-statusline" : plan is null ? "claude-jsonl" : "claude-desktop-plan-usage-history",
+            source_file = useStatusLine ? Path.Combine(_home, "claude-statusline-latest.json") : plan is null ? latest?.File : _claudePlanUsageHistory,
             tokens = new { total_input = input + cached, fresh_input = input, cache_read_input = cached, output },
             percentages = new {
                 context_used = (double?)null,
                 cached_input = input + cached > 0 ? cached * 100 / (input + cached) : 0,
-                five_hour_used = plan?.FiveHourUsed,
-                seven_day_used = plan?.SevenDayUsed
+                five_hour_used = fiveHourUsed,
+                seven_day_used = sevenDayUsed
             },
             resets_at = new {
                 five_hour_epoch_seconds = ToEpochSeconds(fiveHourReset),
                 seven_day_epoch_seconds = ToEpochSeconds(sevenDayReset)
             },
             reset_is_estimated = new {
-                five_hour = fiveHourReset is not null && statusLineFiveHourReset is null,
-                seven_day = sevenDayReset is not null && statusLineSevenDayReset is null
+                five_hour = fiveHourReset is not null && statusLine?.FiveHourReset is null,
+                seven_day = sevenDayReset is not null && statusLine?.SevenDayReset is null
             },
             plan_usage = new {
                 source_file = _claudePlanUsageHistory,
@@ -296,18 +300,34 @@ public sealed class UsageReaderService : IDisposable
         return periodStart is null ? null : FutureOnly(periodStart.Value.AddDays(7));
     }
 
-    private double? ReadReset(string fileName, string propertyName)
+    private ClaudeStatuslineUsage? ReadClaudeStatuslineUsage()
     {
         try
         {
-            var path = Path.Combine(_home, fileName);
+            var path = Path.Combine(_home, "claude-statusline-latest.json");
             if (!File.Exists(path)) return null;
             using var document = JsonDocument.Parse(File.ReadAllText(path));
-            if (!document.RootElement.TryGetProperty("resets_at", out var resets)) return null;
-            var value = NumberOrNull(resets, propertyName);
-            return value is not null && value > DateTimeOffset.UtcNow.ToUnixTimeSeconds() ? value : null;
+            var root = document.RootElement;
+            if (StringOrNull(root, "source") != "claude-code-statusline") return null;
+            var timestamp = StringOrNull(root, "generated_at") ?? StringOrNull(root, "observed_at");
+            if (!DateTimeOffset.TryParse(timestamp, out var observedAt)) return null;
+            var percentages = root.TryGetProperty("percentages", out var p) ? p : default;
+            var resets = root.TryGetProperty("resets_at", out var r) ? r : default;
+            return new ClaudeStatuslineUsage(
+                observedAt,
+                NumberOrNull(percentages, "five_hour_used"),
+                NumberOrNull(percentages, "seven_day_used"),
+                FutureEpoch(NumberOrNull(resets, "five_hour_epoch_seconds")),
+                FutureEpoch(NumberOrNull(resets, "seven_day_epoch_seconds")));
         }
         catch { return null; }
+    }
+
+    private static DateTimeOffset? FutureEpoch(double? epochSeconds)
+    {
+        if (epochSeconds is null) return null;
+        var time = DateTimeOffset.FromUnixTimeSeconds((long)epochSeconds.Value);
+        return time > DateTimeOffset.UtcNow ? time : null;
     }
 
     private static DateTimeOffset? FirstFuture(params object?[] values)
@@ -404,5 +424,6 @@ public sealed class UsageReaderService : IDisposable
     private readonly record struct CodexCandidate(string File, DateTimeOffset Time, JsonElement Json, string Mode);
     private readonly record struct ClaudePlanSample(DateTimeOffset Time, double? FiveHour, double? SevenDay, string? Organization);
     private sealed record ClaudePlanUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, string? Organization, DateTimeOffset? EstimatedFiveHourReset, DateTimeOffset? EstimatedSevenDayReset);
+    private sealed record ClaudeStatuslineUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, DateTimeOffset? FiveHourReset, DateTimeOffset? SevenDayReset);
     public void Dispose() => _timer.Dispose();
 }

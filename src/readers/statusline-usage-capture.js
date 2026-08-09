@@ -9,7 +9,6 @@ const APP_DIRECTORY = process.env.USAGE_VIEWER_HOME ||
 
 const LATEST_FILE = path.join(APP_DIRECTORY, 'latest.json')
 const CLAUDE_LATEST_FILE = path.join(APP_DIRECTORY, 'claude-latest.json')
-const CLAUDE_APP_LATEST_FILE = path.join(APP_DIRECTORY, 'claude-app-latest.json')
 const CLAUDE_STATUSLINE_LATEST_FILE = path.join(APP_DIRECTORY, 'claude-statusline-latest.json')
 const HISTORY_FILE = path.join(APP_DIRECTORY, 'history.jsonl')
 
@@ -28,7 +27,6 @@ process.stdin.on('end', () => {
     fs.mkdirSync(APP_DIRECTORY, { recursive: true })
     writeJsonAtomic(CLAUDE_STATUSLINE_LATEST_FILE, snapshot)
     writeJsonAtomic(CLAUDE_LATEST_FILE, snapshot)
-    writeJsonAtomic(CLAUDE_APP_LATEST_FILE, snapshot)
     writeJsonAtomic(LATEST_FILE, snapshot)
     fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
 

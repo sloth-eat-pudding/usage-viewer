@@ -393,7 +393,7 @@ function Update-CombinedUsageView {
     [System.Windows.Forms.Label]$CostToggle
   )
 
-  $claude = Read-UsageJson $ClaudeUsageFile
+  $claude = Read-LatestClaudeUsage $ClaudeUsageFile
   $codex = Read-UsageJson $CodexUsageFile
 
   if ($null -eq $claude -and $null -eq $codex) {
@@ -581,6 +581,55 @@ function Format-ClaudeUsageLine {
   }
 
   return "Claude in $(Format-CompactCount $Claude.tokens.total_input) out $(Format-CompactCount $Claude.tokens.output)"
+}
+
+function Read-LatestClaudeUsage {
+  param([string]$AppUsageFile)
+
+  $directory = Split-Path -Parent $AppUsageFile
+  $candidates = @(
+    $AppUsageFile,
+    (Join-Path $directory "claude-desktop-latest.json"),
+    (Join-Path $directory "claude-statusline-latest.json")
+  )
+  $latest = $null
+  $latestTimestamp = [DateTimeOffset]::MinValue
+
+  foreach ($file in $candidates) {
+    $candidate = Read-UsageJson $file
+    if ($null -eq $candidate) { continue }
+
+    $timestamp = Get-ClaudeUsageTimestamp $candidate
+    if ($null -eq $latest -or $timestamp -gt $latestTimestamp) {
+      $latest = $candidate
+      $latestTimestamp = $timestamp
+    }
+  }
+
+  return $latest
+}
+
+function Get-ClaudeUsageTimestamp {
+  param($Json)
+
+  $values = @()
+  if ($Json.plan_usage -and $Json.plan_usage.observed_at) {
+    $values += $Json.plan_usage.observed_at
+  }
+  if ($Json.source -eq "claude-code-statusline" -and $Json.generated_at) {
+    $values += $Json.generated_at
+  }
+  $values += @($Json.observed_at, $Json.generated_at)
+
+  foreach ($value in $values) {
+    try {
+      if (-not [string]::IsNullOrWhiteSpace([string]$value)) {
+        return [DateTimeOffset]::Parse([string]$value)
+      }
+    } catch { }
+  }
+
+  return [DateTimeOffset]::MinValue
 }
 
 function Format-CodexUsageLine {
