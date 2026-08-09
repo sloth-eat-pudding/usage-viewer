@@ -1,0 +1,63 @@
+name: Release Windows build
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "7.0.x"
+
+      - name: Publish self-contained Windows app
+        shell: pwsh
+        run: >-
+          dotnet publish src/UsageViewer/UsageViewer.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          --output publish
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $archiveName = "UsageViewer-${{ github.ref_name }}-win-x64.zip"
+          Compress-Archive -LiteralPath "publish/UsageViewer.exe" -DestinationPath $archiveName -Force
+          "ARCHIVE_NAME=$archiveName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: UsageViewer-${{ github.ref_name }}-win-x64
+          path: ${{ env.ARCHIVE_NAME }}
+          if-no-files-found: error
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $repository = "${{ github.repository }}"
+          $archiveName = "${{ env.ARCHIVE_NAME }}"
+
+          gh release view $tag --repo $repository *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $archiveName --repo $repository --clobber
+          } else {
+            gh release create $tag $archiveName --repo $repository --verify-tag --title "Usage Viewer $tag" --generate-notes
+          }

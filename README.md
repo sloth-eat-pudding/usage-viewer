@@ -24,6 +24,21 @@ packaging/               MSIX manifest、圖示與封裝腳本
 
 `start-usage-viewer.cmd` 會優先啟動 `dist\\UsageViewer.exe`；尚未 publish 時才回退到 PowerShell overlay。已 publish 的 App 內建 Claude/Codex reader，不需要 Node.js。
 
+## 直接下載
+
+沒有 .NET SDK 或編譯環境的使用者，請從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`，解壓縮後直接執行 `UsageViewer.exe`。Release 內的 EXE 是 self-contained 版本，不需要另外安裝 .NET 或 Node.js。
+
+## 發布版本
+
+推送以 `v` 開頭的 tag 時，GitHub Actions 會自動建置 Windows x64 self-contained EXE、壓縮成 ZIP，並建立或更新該 tag 的 GitHub Release：
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+建置結果也會保留在該次 Actions run 的 Artifacts 中。
+
 ## 建置桌面 App
 
 ```powershell
