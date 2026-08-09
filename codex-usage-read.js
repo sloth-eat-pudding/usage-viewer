@@ -63,6 +63,9 @@ function readCodexUsage() {
 
   return {
     generated_at: new Date().toISOString(),
+    // The reader may run while Codex is appending to the session file. Keep
+    // the source event time separate from the time this snapshot was written.
+    observed_at: nullableString(tokenCount.timestamp),
     source: 'codex-session-jsonl',
     source_filter: CODEX_USAGE_SOURCE,
     source_file: sessionFile,
@@ -261,16 +264,44 @@ function parseJsonLine(line) {
 }
 
 function writeJsonAtomic(filename, value) {
-  const temporaryFile = `${filename}.${process.pid}.tmp`
-  fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
-
+  const temporaryFile = `${filename}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
   try {
-    fs.rmSync(filename, { force: true })
-  } catch {
-    // Ignore replacement races.
+    fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
+    replaceFile(temporaryFile, filename)
+  } finally {
+    try {
+      fs.rmSync(temporaryFile, { force: true })
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+}
+
+function replaceFile(temporaryFile, filename) {
+  try {
+    fs.renameSync(temporaryFile, filename)
+    return
+  } catch (error) {
+    if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
+      throw error
+    }
   }
 
-  fs.renameSync(temporaryFile, filename)
+  const backupFile = `${filename}.bak-${process.pid}`
+
+  try {
+    if (fs.existsSync(filename)) {
+      fs.renameSync(filename, backupFile)
+    }
+
+    fs.renameSync(temporaryFile, filename)
+  } finally {
+    try {
+      fs.rmSync(backupFile, { force: true })
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
 }
 
 function nullableNumber(value) {

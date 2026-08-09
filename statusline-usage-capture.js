@@ -9,6 +9,7 @@ const APP_DIRECTORY = process.env.USAGE_VIEWER_HOME ||
 
 const LATEST_FILE = path.join(APP_DIRECTORY, 'latest.json')
 const CLAUDE_LATEST_FILE = path.join(APP_DIRECTORY, 'claude-latest.json')
+const CLAUDE_STATUSLINE_LATEST_FILE = path.join(APP_DIRECTORY, 'claude-statusline-latest.json')
 const HISTORY_FILE = path.join(APP_DIRECTORY, 'history.jsonl')
 
 let stdin = ''
@@ -24,6 +25,7 @@ process.stdin.on('end', () => {
     const snapshot = buildSnapshot(data)
 
     fs.mkdirSync(APP_DIRECTORY, { recursive: true })
+    writeJsonAtomic(CLAUDE_STATUSLINE_LATEST_FILE, snapshot)
     writeJsonAtomic(CLAUDE_LATEST_FILE, snapshot)
     writeJsonAtomic(LATEST_FILE, snapshot)
     fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
@@ -97,8 +99,8 @@ function buildSnapshot(data) {
       turn_usd: turnCostUsd
     },
     resets_at: {
-      five_hour_epoch_seconds: nullableNumber(fiveHour.resets_at),
-      seven_day_epoch_seconds: nullableNumber(sevenDay.resets_at)
+      five_hour_epoch_seconds: nullableEpochSeconds(fiveHour.resets_at),
+      seven_day_epoch_seconds: nullableEpochSeconds(sevenDay.resets_at)
     }
   }
 }
@@ -146,16 +148,44 @@ function readJson(filename) {
 }
 
 function writeJsonAtomic(filename, value) {
-  const temporaryFile = `${filename}.${process.pid}.tmp`
-  fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
-
+  const temporaryFile = `${filename}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
   try {
-    fs.rmSync(filename, { force: true })
-  } catch {
-    // Ignore replacement races.
+    fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
+    replaceFile(temporaryFile, filename)
+  } finally {
+    try {
+      fs.rmSync(temporaryFile, { force: true })
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
+}
+
+function replaceFile(temporaryFile, filename) {
+  try {
+    fs.renameSync(temporaryFile, filename)
+    return
+  } catch (error) {
+    if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
+      throw error
+    }
   }
 
-  fs.renameSync(temporaryFile, filename)
+  const backupFile = `${filename}.bak-${process.pid}`
+
+  try {
+    if (fs.existsSync(filename)) {
+      fs.renameSync(filename, backupFile)
+    }
+
+    fs.renameSync(temporaryFile, filename)
+  } finally {
+    try {
+      fs.rmSync(backupFile, { force: true })
+    } catch {
+      // Best-effort cleanup.
+    }
+  }
 }
 
 function nullableNumber(value) {
@@ -165,6 +195,21 @@ function nullableNumber(value) {
 
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function nullableEpochSeconds(value) {
+  const number = nullableNumber(value)
+
+  if (number !== null) {
+    return number > 9999999999 ? Math.floor(number / 1000) : number
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : null
+  }
+
+  return null
 }
 
 function toNumber(value) {

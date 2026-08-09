@@ -20,13 +20,14 @@ internal static class Program
 
 internal sealed class UsageOverlayForm : Form
 {
-    private readonly Size defaultWindowSize = new(420, 88);
+    private readonly Size defaultWindowSize = new(440, 112);
     private readonly Point defaultWindowLocation = new(24, 48);
     private readonly string windowStateFile;
     private readonly string claudeUsageFile;
     private readonly string codexUsageFile;
     private readonly Panel panel;
     private readonly Label main;
+    private readonly Label detail;
     private readonly Button resetButton;
     private readonly Button closeButton;
     private readonly System.Windows.Forms.Timer timer;
@@ -51,7 +52,7 @@ internal sealed class UsageOverlayForm : Form
         Text = "Usage Viewer";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
-        MinimumSize = new Size(360, 80);
+        MinimumSize = new Size(360, 104);
         var savedBounds = LoadWindowBounds();
         Location = savedBounds.Location;
         Size = savedBounds.Size;
@@ -114,14 +115,25 @@ internal sealed class UsageOverlayForm : Form
         {
             AutoSize = false,
             Location = new Point(14, 12),
-            Size = new Size(392, 58),
+            Size = new Size(392, 48),
             Font = new Font("Cascadia Mono", 15, FontStyle.Bold),
             ForeColor = Color.FromArgb(126, 231, 180),
             Text = "Waiting for usage..."
         };
         panel.Controls.Add(main);
 
-        foreach (Control control in new Control[] { this, panel, main })
+        detail = new Label
+        {
+            AutoSize = false,
+            Location = new Point(14, 62),
+            Size = new Size(392, 36),
+            Font = new Font("Cascadia Mono", 9, FontStyle.Regular),
+            ForeColor = Color.White,
+            Text = ""
+        };
+        panel.Controls.Add(detail);
+
+        foreach (Control control in new Control[] { this, panel, main, detail })
         {
             control.MouseDown += HandleMouseDown;
             control.MouseMove += HandleMouseMove;
@@ -197,6 +209,7 @@ internal sealed class UsageOverlayForm : Form
     private void LayoutOverlay()
     {
         main.Width = Math.Max(80, panel.ClientSize.Width - 28);
+        detail.Width = main.Width;
         resetButton.Left = panel.ClientSize.Width - 66;
         closeButton.Left = panel.ClientSize.Width - 34;
     }
@@ -271,29 +284,49 @@ internal sealed class UsageOverlayForm : Form
         if (claude is null && codex is null)
         {
             main.Text = "Waiting for Claude / Codex usage...";
+            detail.Text = "";
             return;
         }
 
         var codexLine = codex is null
-            ? "Codex  limit ?"
-            : $"Codex  week {FormatPercent(GetFirstDouble(codex.RootElement, new[] { "percentages", "seven_day_used" }, new[] { "percentages", "primary_limit_used" }), 2)}";
+            ? "Codex ?%"
+            : $"Codex {FormatPercent(GetFirstDouble(codex.RootElement, new[] { "percentages", "seven_day_used" }, new[] { "percentages", "primary_limit_used" }), 2)}";
 
         var claudeLine = claude is null
-            ? "Claude 5h ?      week ?"
-            : $"Claude 5h {FormatPercent(GetDouble(claude.RootElement, "percentages", "five_hour_used"), 2)}   week {FormatPercent(GetDouble(claude.RootElement, "percentages", "seven_day_used"), 2)}";
+            ? "Claude ?% ?%"
+            : FormatClaudeUsageLine(claude.RootElement);
 
         main.Text = codexLine + Environment.NewLine + claudeLine;
+
+        var codexTimeLine = codex is null
+            ? "Codex ? reset ?"
+            : $"Codex {FormatAge(GetTimestamp(codex.RootElement))} - {FormatReset(GetResetEpoch(codex.RootElement))}";
+
+        var claudeTimeLine = claude is null
+            ? "Claude ? reset ?"
+            : $"Claude {FormatAge(GetTimestamp(claude.RootElement))} - {FormatReset(GetResetEpoch(claude.RootElement))}";
+
+        detail.Text = codexTimeLine + Environment.NewLine + claudeTimeLine;
     }
 
     private void ResizeOverlayToContent()
     {
         var mainWidth = MeasureMultilineTextWidth(main.Text, main.Font);
-        var desiredWidth = Math.Max(MinimumSize.Width, mainWidth + 34);
-        desiredWidth = Math.Min(560, desiredWidth);
+        var detailWidth = MeasureMultilineTextWidth(detail.Text, detail.Font);
+        var desiredWidth = Math.Max(MinimumSize.Width, Math.Max(mainWidth, detailWidth) + 34);
+        desiredWidth = Math.Min(760, desiredWidth);
 
         if (Math.Abs(Width - desiredWidth) > 8)
         {
             Width = desiredWidth;
+            SaveWindowBounds();
+        }
+
+        var desiredHeight = Math.Max(MinimumSize.Height, defaultWindowSize.Height);
+
+        if (Math.Abs(Height - desiredHeight) > 6)
+        {
+            Height = desiredHeight;
             SaveWindowBounds();
         }
     }
@@ -442,6 +475,107 @@ internal sealed class UsageOverlayForm : Form
     private static string FormatPercent(double? value, int digits)
     {
         return value is null ? "?" : value.Value.ToString($"N{digits}") + "%";
+    }
+
+    private static string FormatClaudeUsageLine(JsonElement root)
+    {
+        var week = FormatPercent(GetDouble(root, "percentages", "seven_day_used"), 2);
+        var fiveHour = FormatPercent(GetDouble(root, "percentages", "five_hour_used"), 2);
+
+        if (week != "?" || fiveHour != "?")
+        {
+            return $"Claude {week} {fiveHour}";
+        }
+
+        return $"Claude in {FormatCompactCount(GetDouble(root, "tokens", "total_input"))} out {FormatCompactCount(GetDouble(root, "tokens", "output"))}";
+    }
+
+    private static string FormatCompactCount(double? value)
+    {
+        if (value is null)
+        {
+            return "?";
+        }
+
+        if (value >= 1_000_000)
+        {
+            return (value.Value / 1_000_000).ToString("N1") + "m";
+        }
+
+        if (value >= 1_000)
+        {
+            return (value.Value / 1_000).ToString("N1") + "k";
+        }
+
+        return value.Value.ToString("N0");
+    }
+
+    private static string? GetTimestamp(JsonElement root)
+    {
+        return GetString(root, "observed_at") ?? GetString(root, "generated_at");
+    }
+
+    private static string? GetString(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
+
+    private static double? GetResetEpoch(JsonElement root)
+    {
+        return GetFirstDouble(
+            root,
+            new[] { "resets_at", "seven_day_epoch_seconds" },
+            new[] { "rate_limits", "primary", "resets_at_epoch_seconds" }
+        );
+    }
+
+    private static string FormatAge(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso) || !DateTimeOffset.TryParse(iso, out var timestamp))
+        {
+            return "?";
+        }
+
+        var age = DateTimeOffset.Now - timestamp;
+
+        if (age.TotalSeconds < 60)
+        {
+            return Math.Max(0, (int)age.TotalSeconds) + "s ago";
+        }
+
+        if (age.TotalMinutes < 60)
+        {
+            return (int)age.TotalMinutes + "m ago";
+        }
+
+        return (int)age.TotalHours + "h ago";
+    }
+
+    private static string FormatReset(double? epochSeconds)
+    {
+        if (epochSeconds is null)
+        {
+            return "?";
+        }
+
+        try
+        {
+            return DateTimeOffset
+                .FromUnixTimeSeconds((long)epochSeconds.Value)
+                .ToLocalTime()
+                .ToString("ddd HH:mm");
+        }
+        catch
+        {
+            return "?";
+        }
     }
 }
 

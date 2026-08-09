@@ -83,7 +83,8 @@ $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $windowIconPath = Join-Path $scriptDirectory "assets\usage-viewer.ico"
 $claudeUsageFile = Join-Path $usageHome "claude-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-latest.json"
-$defaultWindowSize = New-Object System.Drawing.Size(420, 88)
+$overlayErrorLog = Join-Path $usageHome "overlay-error.log"
+$defaultWindowSize = New-Object System.Drawing.Size(440, 112)
 
 [OverlayWindowInterop]::SetCurrentProcessExplicitAppUserModelID("SlothEatPudding.UsageViewer") | Out-Null
 
@@ -104,7 +105,7 @@ $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.Location = New-Object System.Drawing.Point(24, 48)
 $form.Size = $defaultWindowSize
-$form.MinimumSize = New-Object System.Drawing.Size(360, 80)
+$form.MinimumSize = New-Object System.Drawing.Size(360, 104)
 $form.TopMost = $true
 $form.ShowIcon = $true
 $form.ShowInTaskbar = $true
@@ -163,7 +164,7 @@ $panel.Controls.Add($title)
 $main = New-Object System.Windows.Forms.Label
 $main.AutoSize = $false
 $main.Location = New-Object System.Drawing.Point(14, 12)
-$main.Size = New-Object System.Drawing.Size(392, 58)
+$main.Size = New-Object System.Drawing.Size(392, 48)
 $main.Font = New-Object System.Drawing.Font("Cascadia Mono", 15, [System.Drawing.FontStyle]::Bold)
 $main.ForeColor = [System.Drawing.Color]::FromArgb(126, 231, 180)
 $main.Text = "Waiting for usage..."
@@ -171,12 +172,12 @@ $panel.Controls.Add($main)
 
 $detail = New-Object System.Windows.Forms.Label
 $detail.AutoSize = $false
-$detail.Location = New-Object System.Drawing.Point(0, 0)
-$detail.Size = New-Object System.Drawing.Size(1, 1)
+$detail.Location = New-Object System.Drawing.Point(14, 62)
+$detail.Size = New-Object System.Drawing.Size(392, 36)
 $detail.Font = New-Object System.Drawing.Font("Cascadia Mono", 9, [System.Drawing.FontStyle]::Regular)
-$detail.ForeColor = [System.Drawing.Color]::FromArgb(174, 185, 196)
+$detail.ForeColor = [System.Drawing.Color]::White
 $detail.Text = $UsageFile
-$detail.Visible = $false
+$detail.Visible = $true
 $panel.Controls.Add($detail)
 
 $costToggle = New-Object System.Windows.Forms.Label
@@ -196,6 +197,7 @@ $script:heightBeforeCostExpand = $null
 $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 28)
   $main.Width = $width
+  $detail.Width = $width
   $resetButton.Left = $panel.ClientSize.Width - 66
   $closeButton.Left = $panel.ClientSize.Width - 34
 }
@@ -298,9 +300,35 @@ function Get-ResizeHitTest {
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
 $timer.Add_Tick({
-  Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
-  Resize-OverlayToContent -Form $form -Title $title -Main $main
+  try {
+    Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+    Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+  } catch {
+    Write-OverlayError $_
+    $title.Text = ""
+    $main.Text = "Overlay error"
+    $detail.Text = $_.Exception.Message
+    $costToggle.Text = ""
+  }
 })
+
+function Write-OverlayError {
+  param($ErrorRecord)
+
+  try {
+    $message = @(
+      "[$([DateTimeOffset]::Now.ToString("o"))]",
+      [string]$ErrorRecord.Exception.GetType().FullName,
+      [string]$ErrorRecord.Exception.Message,
+      [string]$ErrorRecord.ScriptStackTrace,
+      ""
+    ) -join [Environment]::NewLine
+
+    Add-Content -LiteralPath $script:overlayErrorLog -Value $message -Encoding UTF8
+  } catch {
+    # Keep the overlay alive even if logging fails.
+  }
+}
 
 function Update-UsageView {
   param(
@@ -338,11 +366,12 @@ function Update-UsageView {
     $fiveHour = Format-Percent $pct.five_hour_used 2
     $week = Format-Percent $pct.seven_day_used 2
     $cached = Format-Percent $pct.cached_input 1
-    $age = Format-Age $json.generated_at
+    $age = Format-Age (Get-UsageTimestamp $json)
+    $reset = Format-ResetSummary $json
 
     $Title.Text = ""
-    $Main.Text = "5h $fiveHour   week $week"
-    $Detail.Text = ""
+    $Main.Text = Format-ClaudeUsageLine $json
+    $Detail.Text = "Claude $age reset $reset"
     $CostToggle.Text = ""
   } catch {
     $Title.Text = ""
@@ -376,23 +405,35 @@ function Update-CombinedUsageView {
   $Title.Text = ""
 
   $claudeLine = if ($null -eq $claude) {
-    "Claude 5h ?      week ?"
+    "Claude ?% ?%"
   } else {
-    "Claude 5h $(Format-Percent $claude.percentages.five_hour_used 2)   week $(Format-Percent $claude.percentages.seven_day_used 2)"
+    Format-ClaudeUsageLine $claude
   }
 
   $codexLine = if ($null -eq $codex) {
-    "Codex  limit ?"
+    "Codex ?%"
   } else {
     $codexLimit = Format-Percent $codex.percentages.seven_day_used 2
     if ($codexLimit -eq "?") {
       $codexLimit = Format-Percent $codex.percentages.primary_limit_used 2
     }
 
-    "Codex  week $codexLimit"
+    "Codex $codexLimit"
   }
 
   $Main.Text = "$codexLine`r`n$claudeLine"
+
+  $codexTimeLine = if ($null -eq $codex) {
+    "Codex ? reset ?"
+  } else {
+    "Codex $(Format-Age (Get-UsageTimestamp $codex)) - $(Format-ResetSummary $codex)"
+  }
+
+  $claudeTimeLine = if ($null -eq $claude) {
+    "Claude ? reset ?"
+  } else {
+    "Claude $(Format-Age (Get-UsageTimestamp $claude)) - $(Format-ResetSummary $claude)"
+  }
 
   $claudeDetail = if ($null -eq $claude) {
     "Claude waiting"
@@ -406,7 +447,7 @@ function Update-CombinedUsageView {
     "Codex  ctx $(Format-Percent $codex.percentages.context_used 1) in $(Format-Count $codex.tokens.total_input) out $(Format-Count $codex.tokens.output)"
   }
 
-  $Detail.Text = ""
+  $Detail.Text = "$codexTimeLine`r`n$claudeTimeLine"
   $CostToggle.Text = ""
 }
 
@@ -414,20 +455,28 @@ function Resize-OverlayToContent {
   param(
     [System.Windows.Forms.Form]$Form,
     [System.Windows.Forms.Label]$Title,
-    [System.Windows.Forms.Label]$Main
+    [System.Windows.Forms.Label]$Main,
+    [System.Windows.Forms.Label]$Detail
   )
 
   $mainWidth = Measure-MultilineTextWidth -Text $Main.Text -Font $Main.Font
+  $detailWidth = Measure-MultilineTextWidth -Text $Detail.Text -Font $Detail.Font
 
   $desiredWidth = [Math]::Max(
     $Form.MinimumSize.Width,
-    $mainWidth + 34
+    ([Math]::Max($mainWidth, $detailWidth) + 34)
   )
 
-  $desiredWidth = [Math]::Min(560, $desiredWidth)
+  $desiredWidth = [Math]::Min(760, $desiredWidth)
 
   if ([Math]::Abs($Form.Width - $desiredWidth) -gt 8) {
     $Form.Width = $desiredWidth
+  }
+
+  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, 112)
+
+  if ([Math]::Abs($Form.Height - $desiredHeight) -gt 6) {
+    $Form.Height = $desiredHeight
   }
 }
 
@@ -468,11 +517,11 @@ function Measure-TextWidth {
 function Read-UsageJson {
   param([string]$Filename)
 
-  if (-not (Test-Path -LiteralPath $Filename)) {
-    return $null
-  }
-
   try {
+    if (-not (Test-Path -LiteralPath $Filename)) {
+      return $null
+    }
+
     return Get-Content -LiteralPath $Filename -Raw | ConvertFrom-Json
   } catch {
     return $null
@@ -511,6 +560,39 @@ function Format-Percent {
   return "$(([double]$Value).ToString("N$Digits"))%"
 }
 
+function Format-CompactCount {
+  param($Value)
+
+  if ($null -eq $Value) {
+    return "?"
+  }
+
+  $number = [double]$Value
+
+  if ($number -ge 1000000) {
+    return "$(($number / 1000000).ToString("N1"))m"
+  }
+
+  if ($number -ge 1000) {
+    return "$(($number / 1000).ToString("N1"))k"
+  }
+
+  return $number.ToString("N0")
+}
+
+function Format-ClaudeUsageLine {
+  param($Claude)
+
+  $week = Format-Percent $Claude.percentages.seven_day_used 2
+  $fiveHour = Format-Percent $Claude.percentages.five_hour_used 2
+
+  if ($week -ne "?" -or $fiveHour -ne "?") {
+    return "Claude $week $fiveHour"
+  }
+
+  return "Claude in $(Format-CompactCount $Claude.tokens.total_input) out $(Format-CompactCount $Claude.tokens.output)"
+}
+
 function Format-Usd {
   param($Value)
 
@@ -542,7 +624,165 @@ function Format-Age {
   }
 }
 
-Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
-Resize-OverlayToContent -Form $form -Title $title -Main $main
+function Get-UsageTimestamp {
+  param($Json)
+
+  if ($Json.observed_at) {
+    return $Json.observed_at
+  }
+
+  return $Json.generated_at
+}
+
+function Get-ResetEpoch {
+  param($Json)
+
+  if ($Json.resets_at -and $null -ne $Json.resets_at.seven_day_epoch_seconds) {
+    return $Json.resets_at.seven_day_epoch_seconds
+  }
+
+  if ($Json.rate_limits -and $Json.rate_limits.primary -and $null -ne $Json.rate_limits.primary.resets_at_epoch_seconds) {
+    return $Json.rate_limits.primary.resets_at_epoch_seconds
+  }
+
+  return $null
+}
+
+function Get-ResetEpochByName {
+  param($Json, [string]$Name)
+
+  if ($Json.resets_at) {
+    $property = "${Name}_epoch_seconds"
+
+    if ($Json.resets_at.PSObject.Properties.Name -contains $property) {
+      $value = $Json.resets_at.$property
+
+      if ($null -ne $value) {
+        return $value
+      }
+    }
+  }
+
+  return $null
+}
+
+function Format-ResetSummary {
+  param($Json)
+
+  $fiveHour = Format-ResetTime (Get-ResetEpochByName $Json "five_hour")
+  $week = Format-ResetWeekdayTime (Get-ResetEpochByName $Json "seven_day")
+
+  if ($week -ne "?") {
+    if ($fiveHour -ne "?") {
+      return "$week / 5h $fiveHour"
+    }
+    return $week
+  }
+
+  if ($fiveHour -ne "?") {
+    return "5h $fiveHour"
+  }
+
+  return Format-Reset (Get-ResetEpoch $Json)
+}
+
+function Format-ResetTime {
+  param($EpochSeconds)
+
+  if ($null -eq $EpochSeconds) {
+    return "?"
+  }
+
+  try {
+    return [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime().ToString("HH:mm")
+  } catch {
+    return "?"
+  }
+}
+
+function Format-ResetWeekdayTime {
+  param($EpochSeconds)
+
+  if ($null -eq $EpochSeconds) {
+    return "?"
+  }
+
+  try {
+    $local = [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime()
+    $weekPrefix = [string][char]0x9031
+    $weekdayNames = @(
+      "$weekPrefix$([char]0x65E5)",
+      "$weekPrefix$([char]0x4E00)",
+      "$weekPrefix$([char]0x4E8C)",
+      "$weekPrefix$([char]0x4E09)",
+      "$weekPrefix$([char]0x56DB)",
+      "$weekPrefix$([char]0x4E94)",
+      "$weekPrefix$([char]0x516D)"
+    )
+    $weekday = $weekdayNames[[int]$local.DayOfWeek]
+    $weekPrefix = [string][char]0x9031
+    $weekdayNames = @(
+      "$weekPrefix$([char]0x65E5)",
+      "$weekPrefix$([char]0x4E00)",
+      "$weekPrefix$([char]0x4E8C)",
+      "$weekPrefix$([char]0x4E09)",
+      "$weekPrefix$([char]0x56DB)",
+      "$weekPrefix$([char]0x4E94)",
+      "$weekPrefix$([char]0x516D)"
+    )
+    $weekday = $weekdayNames[[int]$local.DayOfWeek]
+    return "$weekday $($local.ToString("HH:mm"))"
+  } catch {
+    return "?"
+  }
+}
+
+function Format-ResetRelative {
+  param($EpochSeconds)
+
+  if ($null -eq $EpochSeconds) {
+    return "?"
+  }
+
+  try {
+    $reset = [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime()
+    $remaining = $reset - [DateTimeOffset]::Now
+
+    if ($remaining.TotalSeconds -le 0) {
+      return "now"
+    }
+
+    if ($remaining.TotalHours -ge 1) {
+      return "$([int]$remaining.TotalHours)h $($remaining.Minutes)m"
+    }
+
+    return "$([Math]::Max(0, [int]$remaining.TotalMinutes))m"
+  } catch {
+    return "?"
+  }
+}
+
+function Format-Reset {
+  param($EpochSeconds)
+
+  if ($null -eq $EpochSeconds) {
+    return "?"
+  }
+
+  try {
+    return [DateTimeOffset]::FromUnixTimeSeconds([int64]$EpochSeconds).ToLocalTime().ToString("M/d HH:mm")
+  } catch {
+    return "?"
+  }
+}
+
+try {
+  Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+  Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+} catch {
+  Write-OverlayError $_
+  $main.Text = "Overlay error"
+  $detail.Text = $_.Exception.Message
+}
 $timer.Start()
 [void][System.Windows.Forms.Application]::Run($form)
