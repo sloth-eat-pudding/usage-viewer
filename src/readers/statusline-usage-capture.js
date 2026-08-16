@@ -38,26 +38,9 @@ process.stdin.on('end', () => {
 
 function buildSnapshot(data) {
   const context = data.context_window || {}
-  const usage = context.current_usage || {}
   const rateLimits = data.rate_limits || {}
   const fiveHour = rateLimits.five_hour || {}
   const sevenDay = rateLimits.seven_day || {}
-
-  const freshInput = toNumber(usage.input_tokens)
-  const output = toNumber(usage.output_tokens)
-  const cacheRead = toNumber(usage.cache_read_input_tokens)
-  const cacheWrite = toNumber(usage.cache_creation_input_tokens)
-  const totalInput = freshInput + cacheRead + cacheWrite
-  const newInput = freshInput + cacheWrite
-  const cachedPct = percent(cacheRead, totalInput)
-
-  const sessionCostUsd = toNumber(data.cost && data.cost.total_cost_usd)
-  const previous = readJson(CLAUDE_LATEST_FILE)
-  const turnCostUsd = calculateTurnCost({
-    previous,
-    promptId: nullableString(data.prompt_id),
-    sessionCostUsd
-  })
 
   return {
     generated_at: new Date().toISOString(),
@@ -80,24 +63,11 @@ function buildSnapshot(data) {
       effort: nullableString(data.effort && data.effort.level)
     },
     prompt_id: nullableString(data.prompt_id),
-    tokens: {
-      total_input: totalInput,
-      fresh_input: freshInput,
-      cache_read_input: cacheRead,
-      cache_creation_input: cacheWrite,
-      new_input: newInput,
-      output
-    },
     percentages: {
       context_used: nullableNumber(context.used_percentage),
       context_remaining: nullableNumber(context.remaining_percentage),
-      cached_input: cachedPct,
       five_hour_used: nullableNumber(fiveHour.used_percentage),
       seven_day_used: nullableNumber(sevenDay.used_percentage)
-    },
-    cost: {
-      session_usd: sessionCostUsd,
-      turn_usd: turnCostUsd
     },
     resets_at: {
       five_hour_epoch_seconds: nullableEpochSeconds(fiveHour.resets_at),
@@ -106,36 +76,12 @@ function buildSnapshot(data) {
   }
 }
 
-function calculateTurnCost({ previous, promptId, sessionCostUsd }) {
-  if (!previous || !Number.isFinite(previous.cost && previous.cost.session_usd)) {
-    return sessionCostUsd
-  }
-
-  const previousSessionCost = toNumber(previous.cost.session_usd)
-
-  if (sessionCostUsd < previousSessionCost) {
-    return sessionCostUsd
-  }
-
-  if (promptId && promptId !== previous.prompt_id) {
-    return Math.max(0, sessionCostUsd - previousSessionCost)
-  }
-
-  return toNumber(previous.cost.turn_usd)
-}
-
 function formatStatusLine(snapshot) {
-  const context = snapshot.percentages.context_used
   const fiveHour = snapshot.percentages.five_hour_used
+  const sevenDay = snapshot.percentages.seven_day_used
 
   return [
-    `ctx:${context === null ? '?' : `${context.toFixed(1)}%`}`,
-    `in:${formatInteger(snapshot.tokens.total_input)}`,
-    `cached:${snapshot.percentages.cached_input.toFixed(1)}%`,
-    `new:${formatInteger(snapshot.tokens.new_input)}`,
-    `out:${formatInteger(snapshot.tokens.output)}`,
-    `cost:$${snapshot.cost.session_usd.toFixed(3)}`,
-    `turn:$${snapshot.cost.turn_usd.toFixed(3)}`,
+    `7d:${sevenDay === null ? '?' : `${sevenDay.toFixed(2)}%`}`,
     `5h:${fiveHour === null ? '?' : `${fiveHour.toFixed(2)}%`}`
   ].join(' | ')
 }

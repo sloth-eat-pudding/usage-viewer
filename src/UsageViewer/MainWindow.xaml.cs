@@ -70,8 +70,7 @@ public partial class MainWindow : Window
     {
         var fiveHour = Percent(root, "five_hour_used");
         var sevenDay = Percent(root, "seven_day_used");
-        if (fiveHour != "?" || sevenDay != "?") return $"7d {sevenDay}  |  5h {fiveHour}";
-        return TokenUsage(root);
+        return $"7d {sevenDay}  |  5h {fiveHour}";
     }
 
     private static string CodexUsageLine(JsonElement? root)
@@ -103,25 +102,6 @@ public partial class MainWindow : Window
         }
         if (!root.Value.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.String) return "";
         return source.GetString() == "claude-code-statusline" ? "(C)" : "(D)";
-    }
-
-    private static string TokenUsage(JsonElement? root)
-    {
-        if (root is not null && root.Value.TryGetProperty("tokens", out var tokens))
-        {
-            var input = TokenCount(tokens, "total_input");
-            var output = TokenCount(tokens, "output");
-            var cached = TokenCount(tokens, "cache_read_input");
-            return $"{input} in / {output} out / cache {cached}";
-        }
-        return "usage available";
-    }
-
-    private static string TokenCount(JsonElement tokens, string name)
-    {
-        return tokens.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
-            ? value.GetDouble().ToString("N0")
-            : "?";
     }
 
     private static string ClaudeDetails(JsonElement? root)

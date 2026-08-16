@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace UsageViewer;
 
@@ -7,32 +10,43 @@ public sealed class UsageReaderService : IDisposable
 {
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
     private readonly string? _claudePlanUsageHistory = FindClaudePlanUsageHistory();
+    private DateTimeOffset? _lastClaudeSelectedSourceWriteTimeUtc;
+    private string? _lastClaudeSelectedSource;
+    private DateTimeOffset? _lastClaudeUsageCommandTriggerUtc;
+    private DateTimeOffset? _nextClaudeUsageCommandUtc;
+    private DateTimeOffset? _claudeCommandFiveHourReset;
+    private DateTimeOffset? _claudeCommandSevenDayReset;
+    private readonly object _claudeUsageCommandLock = new();
     private readonly Timer _timer;
+    private Process? _activeClaudeProcess;
+    private bool _disposed;
 
     public UsageReaderService()
     {
+        // Populate Claude immediately so the window has data before the first timer tick.
+        try { WriteClaude(); } catch { }
+        try { WriteCodex(); } catch { }
         _timer = new Timer(_ => Refresh(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
     }
 
     private void Refresh()
     {
-        try { WriteCodex(); } catch { }
+        if (_disposed) return;
         try { WriteClaude(); } catch { }
+        try { WriteCodex(); } catch { }
     }
 
     private void WriteCodex()
     {
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
-        var latestByMode = FindLatestCodexUsageByMode(root);
-        if (latestByMode.Count == 0) return;
+        var latest = FindLatestCodexUsage(root);
+        if (latest is null) return;
 
-        if (latestByMode.TryGetValue("desktop", out var desktop))
-            WriteCodexSnapshot("codex-desktop-latest.json", desktop);
-        if (latestByMode.TryGetValue("cli", out var cli))
-            WriteCodexSnapshot("codex-cli-latest.json", cli);
-
-        var latest = latestByMode.Values.OrderByDescending(candidate => candidate.Time).First();
-        WriteCodexSnapshot("codex-app-latest.json", latest);
+        if (latest.Value.Mode.Equals("desktop", StringComparison.OrdinalIgnoreCase))
+            WriteCodexSnapshot("codex-desktop-latest.json", latest.Value);
+        if (latest.Value.Mode.Equals("cli", StringComparison.OrdinalIgnoreCase))
+            WriteCodexSnapshot("codex-cli-latest.json", latest.Value);
+        WriteCodexSnapshot("codex-app-latest.json", latest.Value);
     }
 
     private void WriteCodexSnapshot(string fileName, CodexCandidate latest)
@@ -72,10 +86,9 @@ public sealed class UsageReaderService : IDisposable
         });
     }
 
-    private static Dictionary<string, CodexCandidate> FindLatestCodexUsageByMode(string root)
+    private static CodexCandidate? FindLatestCodexUsage(string root)
     {
-        var latestByMode = new Dictionary<string, CodexCandidate>(StringComparer.OrdinalIgnoreCase);
-        if (!Directory.Exists(root)) return latestByMode;
+        if (!Directory.Exists(root)) return null;
 
         IEnumerable<(string File, DateTimeOffset Mtime)> files;
         try
@@ -83,21 +96,17 @@ public sealed class UsageReaderService : IDisposable
             files = Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories)
                 .Select(file => (File: file, Mtime: new DateTimeOffset(File.GetLastWriteTimeUtc(file))))
                 .OrderByDescending(item => item.Mtime)
-                .Take(120)
                 .ToArray();
         }
-        catch { return latestByMode; }
+        catch { return null; }
 
         foreach (var item in files)
         {
             var candidate = ReadCodexUsageFile(item.File, item.Mtime);
-            if (candidate is null) continue;
-            if (!latestByMode.TryGetValue(candidate.Value.Mode, out var current) || candidate.Value.Time > current.Time)
-                latestByMode[candidate.Value.Mode] = candidate.Value;
-            if (latestByMode.ContainsKey("desktop") && latestByMode.ContainsKey("cli")) break;
+            if (candidate is not null) return candidate;
         }
 
-        return latestByMode;
+        return null;
     }
 
     private static CodexCandidate? ReadCodexUsageFile(string file, DateTimeOffset fallbackTime)
@@ -135,7 +144,7 @@ public sealed class UsageReaderService : IDisposable
 
             if (sessionMeta is null || latestUsage is null) return null;
             var mode = ClassifyCodexMode(sessionMeta.Value);
-            return mode is null ? null : new CodexCandidate(file, latestUsageTime, latestUsage.Value, mode);
+            return mode is null ? null : new CodexCandidate(file, fallbackTime, latestUsage.Value, mode);
         }
         catch { return null; }
     }
@@ -186,35 +195,58 @@ public sealed class UsageReaderService : IDisposable
 
     private void WriteClaude()
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
-        var latest = FindLatest(root, IsClaudeUsage);
-        var plan = ReadClaudePlanUsage();
-        if (latest is null && plan is null) return;
+        if (TryWriteClaudeUsageFromCommand()) return;
 
-        var message = latest is not null && latest.Value.Json.TryGetProperty("message", out var m) ? m : default;
-        var usage = message.ValueKind == JsonValueKind.Object && message.TryGetProperty("usage", out var u) ? u : default;
-        var input = Number(usage, "input_tokens");
-        var cached = Number(usage, "cache_read_input_tokens");
-        var output = Number(usage, "output_tokens");
-        var statusLine = ReadClaudeStatuslineUsage();
-        var useStatusLine = statusLine is not null && (plan is null || statusLine.ObservedAt > plan.ObservedAt);
-        var fiveHourUsed = useStatusLine ? statusLine?.FiveHourUsed ?? plan?.FiveHourUsed : plan?.FiveHourUsed;
-        var sevenDayUsed = useStatusLine ? statusLine?.SevenDayUsed ?? plan?.SevenDayUsed : plan?.SevenDayUsed;
-        var fiveHourReset = FirstFuture(statusLine?.FiveHourReset, plan?.EstimatedFiveHourReset);
-        var sevenDayReset = FirstFuture(statusLine?.SevenDayReset, plan?.EstimatedSevenDayReset);
-        var observedAt = useStatusLine
-            ? statusLine!.ObservedAt
-            : plan?.ObservedAt ?? latest?.Time ?? DateTimeOffset.UtcNow;
+        var cliSource = Path.Combine(_home, "claude-statusline-latest.json");
+        var desktopSource = _claudePlanUsageHistory;
+        var cliWriteTime = TryGetWriteTimeUtc(cliSource);
+        var desktopWriteTime = desktopSource is null ? null : TryGetWriteTimeUtc(desktopSource);
+
+        var useCli = cliWriteTime is not null &&
+            (desktopWriteTime is null || cliWriteTime > desktopWriteTime);
+        var statusLine = useCli ? ReadClaudeStatuslineUsage() : null;
+        if (useCli && (statusLine is null || (statusLine.FiveHourUsed is null && statusLine.SevenDayUsed is null)))
+        {
+            useCli = false;
+        }
+        var selectedSource = useCli ? cliSource : desktopSource;
+        var sourceWriteTime = useCli ? cliWriteTime : desktopWriteTime;
+        if (selectedSource is null || sourceWriteTime is null) return;
+        if (_lastClaudeSelectedSource == selectedSource && _lastClaudeSelectedSourceWriteTimeUtc == sourceWriteTime) return;
+
+        double? fiveHourUsed;
+        double? sevenDayUsed;
+        DateTimeOffset? fiveHourReset;
+        DateTimeOffset? sevenDayReset;
+        bool resetEstimated;
+
+        if (useCli)
+        {
+            if (statusLine is null) return;
+            fiveHourUsed = statusLine.FiveHourUsed;
+            sevenDayUsed = statusLine.SevenDayUsed;
+            fiveHourReset = _claudeCommandFiveHourReset ?? statusLine.FiveHourReset;
+            sevenDayReset = _claudeCommandSevenDayReset ?? statusLine.SevenDayReset;
+            resetEstimated = _claudeCommandFiveHourReset is null && _claudeCommandSevenDayReset is null;
+        }
+        else
+        {
+            var plan = ReadClaudePlanUsage();
+            if (plan is null) return;
+            fiveHourUsed = plan.FiveHourUsed;
+            sevenDayUsed = plan.SevenDayUsed;
+            fiveHourReset = _claudeCommandFiveHourReset ?? plan.EstimatedFiveHourReset;
+            sevenDayReset = _claudeCommandSevenDayReset ?? plan.EstimatedSevenDayReset;
+            resetEstimated = _claudeCommandFiveHourReset is null && _claudeCommandSevenDayReset is null;
+        }
 
         WriteJson("claude-app-latest.json", new {
-            generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = observedAt.ToString("O"),
-            source = useStatusLine ? "claude-code-statusline" : plan is null ? "claude-jsonl" : "claude-desktop-plan-usage-history",
-            source_mode = useStatusLine ? "cli" : "desktop",
-            source_file = useStatusLine ? Path.Combine(_home, "claude-statusline-latest.json") : plan is null ? latest?.File : _claudePlanUsageHistory,
-            tokens = new { total_input = input + cached, fresh_input = input, cache_read_input = cached, output },
+            generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = sourceWriteTime.Value.ToString("O"),
+            source = useCli ? "claude-code-statusline" : "claude-desktop-plan-usage-history",
+            source_mode = useCli ? "cli" : "desktop",
+            source_file = selectedSource,
             percentages = new {
                 context_used = (double?)null,
-                cached_input = input + cached > 0 ? cached * 100 / (input + cached) : 0,
                 five_hour_used = fiveHourUsed,
                 seven_day_used = sevenDayUsed
             },
@@ -223,15 +255,187 @@ public sealed class UsageReaderService : IDisposable
                 seven_day_epoch_seconds = ToEpochSeconds(sevenDayReset)
             },
             reset_is_estimated = new {
-                five_hour = fiveHourReset is not null && statusLine?.FiveHourReset is null,
-                seven_day = sevenDayReset is not null && statusLine?.SevenDayReset is null
-            },
-            plan_usage = new {
-                source_file = _claudePlanUsageHistory,
-                observed_at = plan?.ObservedAt.ToString("O"),
-                org = plan?.Organization
+                five_hour = resetEstimated && fiveHourReset is not null,
+                seven_day = resetEstimated && sevenDayReset is not null
             }
         });
+
+        _lastClaudeSelectedSource = selectedSource;
+        _lastClaudeSelectedSourceWriteTimeUtc = sourceWriteTime;
+    }
+
+    private bool TryWriteClaudeUsageFromCommand()
+    {
+        lock (_claudeUsageCommandLock)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var cliWriteTime = TryGetWriteTimeUtc(Path.Combine(_home, "claude-statusline-latest.json"));
+            var desktopWriteTime = _claudePlanUsageHistory is null ? null : TryGetWriteTimeUtc(_claudePlanUsageHistory);
+            var sourceMarker = new[] { cliWriteTime, desktopWriteTime }.Max();
+            var sourceChanged = sourceMarker is not null && sourceMarker != _lastClaudeUsageCommandTriggerUtc;
+            var resetDue = _nextClaudeUsageCommandUtc is null || now >= _nextClaudeUsageCommandUtc;
+
+            if (!sourceChanged && !resetDue && _lastClaudeUsageCommandTriggerUtc is not null) return true;
+
+            if (!TryRunClaudeUsageCommand(out var output)) return false;
+            if (!TryParseClaudeUsage(output, out var fiveHourUsed, out var sevenDayUsed, out var fiveHourReset, out var sevenDayReset))
+            {
+                TraceClaude($"parse failed output={output.Replace("\r", " ").Replace("\n", " | ")}");
+                return false;
+            }
+
+            _lastClaudeUsageCommandTriggerUtc = sourceMarker ?? now;
+            _claudeCommandFiveHourReset = fiveHourReset;
+            _claudeCommandSevenDayReset = sevenDayReset;
+            _nextClaudeUsageCommandUtc = new[] { fiveHourReset, sevenDayReset }
+                .Where(value => value is not null && value > now)
+                .OrderBy(value => value)
+                .FirstOrDefault() ?? now.AddMinutes(5);
+            // Keep the original file-based percentages; only carry the exact
+            // reset timestamps into the snapshot written by WriteClaude().
+            _lastClaudeSelectedSource = null;
+            _lastClaudeSelectedSourceWriteTimeUtc = null;
+            return false;
+        }
+    }
+
+    private bool TryRunClaudeUsageCommand(out string output)
+    {
+        output = "";
+        try
+        {
+            var command = FindClaudeCliCommand();
+            if (command is null) { TraceClaude("command not found"); return false; }
+            TraceClaude($"command={command}");
+
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            var commandLine = command.Contains(' ', StringComparison.Ordinal)
+                ? $"\"{command}\" -p /usage"
+                : $"{command} -p /usage";
+            process.StartInfo.Arguments = $"/d /s /c \"{commandLine}\"";
+            lock (_claudeUsageCommandLock)
+            {
+                if (_disposed) return false;
+                _activeClaudeProcess = process;
+            }
+            if (!process.Start()) { TraceClaude("process start returned false"); return false; }
+            if (!process.WaitForExit(15000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                TraceClaude("timeout");
+                return false;
+            }
+            output = process.StandardOutput.ReadToEnd();
+            TraceClaude($"exit={process.ExitCode} output={output.Replace("\r", " ").Replace("\n", " | ")}");
+            return process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output);
+        }
+        catch (Exception error) { TraceClaude($"exception={error}"); return false; }
+        finally
+        {
+            lock (_claudeUsageCommandLock)
+            {
+                if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
+                {
+                    try { _activeClaudeProcess.Kill(entireProcessTree: true); } catch { }
+                }
+                _activeClaudeProcess = null;
+            }
+        }
+    }
+
+    private static string? FindClaudeCliCommand()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var cliRoot = Path.Combine(appData, "Claude", "claude-code");
+        try
+        {
+            var installed = Directory.Exists(cliRoot)
+                ? Directory.EnumerateFiles(cliRoot, "claude.exe", SearchOption.AllDirectories)
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault()
+                : null;
+            if (installed is not null) return installed;
+        }
+        catch { }
+
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            foreach (var name in new[] { "claude.exe", "claude.cmd", "claude.bat", "claude" })
+            {
+                var candidate = Path.Combine(directory, name);
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static void TraceClaude(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "claude-usage-command.log"), $"{DateTimeOffset.UtcNow:O} {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    private static bool TryParseClaudeUsage(
+        string output,
+        out double fiveHourUsed,
+        out double sevenDayUsed,
+        out DateTimeOffset? fiveHourReset,
+        out DateTimeOffset? sevenDayReset)
+    {
+        fiveHourUsed = 0;
+        sevenDayUsed = 0;
+        fiveHourReset = null;
+        sevenDayReset = null;
+
+        var session = Regex.Match(output, @"Current session:\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+(?<reset>[A-Za-z]{3}\s+\d{1,2},\s+\d{1,2}:\d{2}[ap]m)\s+\((?<zone>[^)]+)\)", RegexOptions.IgnoreCase);
+        var week = Regex.Match(output, @"Current week \(all models\):\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+(?<reset>[A-Za-z]{3}\s+\d{1,2},\s+\d{1,2}:\d{2}[ap]m)\s+\((?<zone>[^)]+)\)", RegexOptions.IgnoreCase);
+        if (!session.Success || !week.Success ||
+            !double.TryParse(session.Groups["percent"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out fiveHourUsed) ||
+            !double.TryParse(week.Groups["percent"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out sevenDayUsed)) return false;
+
+        fiveHourReset = ParseClaudeReset(session.Groups["reset"].Value, session.Groups["zone"].Value);
+        sevenDayReset = ParseClaudeReset(week.Groups["reset"].Value, week.Groups["zone"].Value);
+        return fiveHourReset is not null && sevenDayReset is not null;
+    }
+
+    private static DateTimeOffset? ParseClaudeReset(string text, string zoneName)
+    {
+        text = Regex.Replace(text, "am$", "AM", RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "pm$", "PM", RegexOptions.IgnoreCase);
+        if (!DateTime.TryParseExact(text, "MMM d, h:mmtt", CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var localTime)) return null;
+        var windowsZone = zoneName.Equals("Asia/Taipei", StringComparison.OrdinalIgnoreCase) ? "Taipei Standard Time" : zoneName;
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById(windowsZone);
+            var utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified), zone);
+            return new DateTimeOffset(utc);
+        }
+        catch { return null; }
+    }
+
+    private static DateTimeOffset? TryGetWriteTimeUtc(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? new DateTimeOffset(File.GetLastWriteTimeUtc(path)) : null;
+        }
+        catch { return null; }
     }
 
     private ClaudePlanUsage? ReadClaudePlanUsage()
@@ -352,11 +556,9 @@ public sealed class UsageReaderService : IDisposable
     private static string? FindClaudePlanUsageHistory()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var roamingAppData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var candidates = new List<string>
         {
-            Path.Combine(localAppData, "Packages", "Claude_pzs8sxrjxfjjc", "LocalCache", "Roaming", "Claude", "plan-usage-history.json"),
-            Path.Combine(roamingAppData, "Claude", "plan-usage-history.json")
+            Path.Combine(localAppData, "Packages", "Claude_*", "LocalCache", "Roaming", "Claude", "plan-usage-history.json")
         };
 
         try
@@ -364,8 +566,9 @@ public sealed class UsageReaderService : IDisposable
             var packages = Path.Combine(localAppData, "Packages");
             if (Directory.Exists(packages))
             {
-                candidates.AddRange(Directory.EnumerateDirectories(packages, "Claude_*")
-                    .Select(directory => Path.Combine(directory, "LocalCache", "Roaming", "Claude", "plan-usage-history.json")));
+                candidates = Directory.EnumerateDirectories(packages, "Claude_*")
+                    .Select(directory => Path.Combine(directory, "LocalCache", "Roaming", "Claude", "plan-usage-history.json"))
+                    .ToList();
             }
         }
         catch { }
@@ -426,5 +629,20 @@ public sealed class UsageReaderService : IDisposable
     private readonly record struct ClaudePlanSample(DateTimeOffset Time, double? FiveHour, double? SevenDay, string? Organization);
     private sealed record ClaudePlanUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, string? Organization, DateTimeOffset? EstimatedFiveHourReset, DateTimeOffset? EstimatedSevenDayReset);
     private sealed record ClaudeStatuslineUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, DateTimeOffset? FiveHourReset, DateTimeOffset? SevenDayReset);
-    public void Dispose() => _timer.Dispose();
+    public void Dispose()
+    {
+        lock (_claudeUsageCommandLock)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            try
+            {
+                if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
+                    _activeClaudeProcess.Kill(entireProcessTree: true);
+            }
+            catch { }
+            _activeClaudeProcess = null;
+        }
+        _timer.Dispose();
+    }
 }

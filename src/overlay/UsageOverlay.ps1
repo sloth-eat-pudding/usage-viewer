@@ -576,11 +576,7 @@ function Format-ClaudeUsageLine {
   $week = Format-UsagePercent $Claude.percentages.seven_day_used
   $fiveHour = Format-UsagePercent $Claude.percentages.five_hour_used
 
-  if ($week -ne "?" -or $fiveHour -ne "?") {
-    return "Claude  7d $week  |  5h $fiveHour"
-  }
-
-  return "Claude in $(Format-CompactCount $Claude.tokens.total_input) out $(Format-CompactCount $Claude.tokens.output)"
+  return "Claude  7d $week  |  5h $fiveHour"
 }
 
 function Read-LatestClaudeUsage {

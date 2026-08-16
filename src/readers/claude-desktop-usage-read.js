@@ -53,27 +53,6 @@ function readClaudeDesktopUsage() {
   const entry = latest.entry
   const sourceFileMtime = new Date(latest.mtimeMs).toISOString()
   const message = entry.message || {}
-  const usage = message.usage || {}
-  const iterations = Array.isArray(usage.iterations) ? usage.iterations : []
-  const lastIteration = iterations.length > 0 ? iterations[iterations.length - 1] : {}
-
-  const inputTokens = firstNumber([
-    usage.input_tokens,
-    lastIteration.input_tokens
-  ])
-  const cacheReadInputTokens = firstNumber([
-    usage.cache_read_input_tokens,
-    lastIteration.cache_read_input_tokens
-  ])
-  const cacheCreationInputTokens = firstNumber([
-    usage.cache_creation_input_tokens,
-    lastIteration.cache_creation_input_tokens
-  ])
-  const outputTokens = firstNumber([
-    usage.output_tokens,
-    lastIteration.output_tokens
-  ])
-  const totalInput = inputTokens + cacheReadInputTokens + cacheCreationInputTokens
   const planUsage = readLatestPlanUsage()
   const previous = readJson(CLAUDE_LATEST_FILE)
   const previousResets = previous && previous.resets_at ? previous.resets_at : {}
@@ -109,24 +88,11 @@ function readClaudeDesktopUsage() {
       effort: nullableString(entry.effort)
     },
     prompt_id: nullableString(message.id || entry.requestId),
-    tokens: {
-      total_input: totalInput,
-      fresh_input: inputTokens,
-      cache_read_input: cacheReadInputTokens,
-      cache_creation_input: cacheCreationInputTokens,
-      new_input: inputTokens + cacheCreationInputTokens,
-      output: outputTokens
-    },
     percentages: {
       context_used: null,
       context_remaining: null,
-      cached_input: totalInput > 0 ? (cacheReadInputTokens / totalInput) * 100 : 0,
       five_hour_used: planUsage ? nullableNumber(planUsage.usage.fh) : null,
       seven_day_used: planUsage ? nullableNumber(planUsage.usage.sd) : null
-    },
-    cost: {
-      session_usd: null,
-      turn_usd: null
     },
     resets_at: {
       five_hour_epoch_seconds: fiveHourReset,
@@ -419,18 +385,6 @@ function* walkFiles(root) {
   }
 }
 
-function firstNumber(values) {
-  for (const value of values) {
-    const number = toNumber(value)
-
-    if (Number.isFinite(number)) {
-      return number
-    }
-  }
-
-  return 0
-}
-
 function toNumber(value) {
   if (value === null || value === undefined || value === '') {
     return 0
@@ -547,14 +501,9 @@ function replaceFile(tempFile, file) {
 function formatSummary(snapshot) {
   return [
     `Claude Desktop ${snapshot.model.name || 'unknown'}`,
-    `in ${formatCount(snapshot.tokens.total_input)}`,
-    `out ${formatCount(snapshot.tokens.output)}`,
-    `cached ${formatPercent(snapshot.percentages.cached_input)}`
+    `7d ${formatPercent(snapshot.percentages.seven_day_used)}`,
+    `5h ${formatPercent(snapshot.percentages.five_hour_used)}`
   ].join(' ')
-}
-
-function formatCount(value) {
-  return Number(value || 0).toLocaleString('en-US')
 }
 
 function formatPercent(value) {
