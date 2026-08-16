@@ -42,7 +42,7 @@ git push origin v1.0.0
 ## 建置桌面 App
 
 ```powershell
-dotnet publish src\\UsageViewer\\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist
+dotnet publish src\\UsageViewer\\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:SatelliteResourceLanguages=en -o dist
 ```
 
 MSIX 封裝需要 Windows SDK 的 `makeappx.exe`：
