@@ -18,26 +18,52 @@ public sealed class UsageReaderService : IDisposable
     private DateTimeOffset? _claudeCommandSevenDayReset;
     private readonly object _claudeUsageCommandLock = new();
     private readonly Timer _timer;
+    private readonly FileSystemWatcher? _codexWatcher;
     private Process? _activeClaudeProcess;
-    private bool _disposed;
+    private volatile bool _disposed;
+    private int _refreshRunning;
+    private int _codexDirty = 1;
 
     public UsageReaderService()
     {
-        // Populate Claude immediately so the window has data before the first timer tick.
-        try { WriteClaude(); } catch { }
-        try { WriteCodex(); } catch { }
+        var codexRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
+        if (Directory.Exists(codexRoot))
+        {
+            try
+            {
+                _codexWatcher = new FileSystemWatcher(codexRoot, "*.jsonl")
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    EnableRaisingEvents = true
+                };
+                _codexWatcher.Created += MarkCodexDirty;
+                _codexWatcher.Changed += MarkCodexDirty;
+                _codexWatcher.Renamed += MarkCodexDirty;
+            }
+            catch { _codexWatcher = null; }
+        }
         _timer = new Timer(_ => Refresh(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
     }
 
     private void Refresh()
     {
-        if (_disposed) return;
-        try { WriteClaude(); } catch { }
-        try { WriteCodex(); } catch { }
+        if (_disposed || Interlocked.Exchange(ref _refreshRunning, 1) != 0) return;
+        try
+        {
+            // Claude is intentionally read first, but off the UI thread.
+            try { WriteClaude(); } catch { }
+            try { WriteCodex(); } catch { }
+        }
+        finally { Volatile.Write(ref _refreshRunning, 0); }
     }
+
+    private void MarkCodexDirty(object? sender, FileSystemEventArgs e) => Volatile.Write(ref _codexDirty, 1);
 
     private void WriteCodex()
     {
+        // If monitoring is unavailable, keep the old polling behavior as a fallback.
+        if (_codexWatcher is not null && Interlocked.Exchange(ref _codexDirty, 0) == 0) return;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
         var latest = FindLatestCodexUsage(root);
         if (latest is null) return;
@@ -644,5 +670,10 @@ public sealed class UsageReaderService : IDisposable
             _activeClaudeProcess = null;
         }
         _timer.Dispose();
+        if (_codexWatcher is not null)
+        {
+            _codexWatcher.EnableRaisingEvents = false;
+            _codexWatcher.Dispose();
+        }
     }
 }
