@@ -16,6 +16,8 @@ public sealed class UsageReaderService : IDisposable
     private DateTimeOffset? _nextClaudeUsageCommandUtc;
     private DateTimeOffset? _claudeCommandFiveHourReset;
     private DateTimeOffset? _claudeCommandSevenDayReset;
+    private double? _claudeCommandFiveHourUsed;
+    private double? _claudeCommandSevenDayUsed;
     private readonly object _claudeUsageCommandLock = new();
     private readonly Timer _timer;
     private readonly FileSystemWatcher? _codexWatcher;
@@ -52,8 +54,8 @@ public sealed class UsageReaderService : IDisposable
         try
         {
             // Claude is intentionally read first, but off the UI thread.
-            try { WriteClaude(); } catch { }
-            try { WriteCodex(); } catch { }
+            try { WriteClaude(); } catch (Exception error) { TraceClaude($"claude refresh exception={error.Message}"); }
+            try { WriteCodex(); } catch (Exception error) { TraceClaude($"codex refresh exception={error.Message}"); }
         }
         finally { Volatile.Write(ref _refreshRunning, 0); }
     }
@@ -258,11 +260,11 @@ public sealed class UsageReaderService : IDisposable
         else
         {
             var plan = ReadClaudePlanUsage();
-            if (plan is null) return;
-            fiveHourUsed = plan.FiveHourUsed;
-            sevenDayUsed = plan.SevenDayUsed;
-            fiveHourReset = _claudeCommandFiveHourReset ?? plan.EstimatedFiveHourReset;
-            sevenDayReset = _claudeCommandSevenDayReset ?? plan.EstimatedSevenDayReset;
+            if (plan is null && _claudeCommandFiveHourUsed is null && _claudeCommandSevenDayUsed is null) return;
+            fiveHourUsed = plan?.FiveHourUsed ?? _claudeCommandFiveHourUsed;
+            sevenDayUsed = plan?.SevenDayUsed ?? _claudeCommandSevenDayUsed;
+            fiveHourReset = _claudeCommandFiveHourReset ?? plan?.EstimatedFiveHourReset;
+            sevenDayReset = _claudeCommandSevenDayReset ?? plan?.EstimatedSevenDayReset;
             resetEstimated = _claudeCommandFiveHourReset is null && _claudeCommandSevenDayReset is null;
         }
 
@@ -313,6 +315,8 @@ public sealed class UsageReaderService : IDisposable
             _lastClaudeUsageCommandTriggerUtc = sourceMarker ?? now;
             _claudeCommandFiveHourReset = fiveHourReset;
             _claudeCommandSevenDayReset = sevenDayReset;
+            _claudeCommandFiveHourUsed = fiveHourUsed;
+            _claudeCommandSevenDayUsed = sevenDayUsed;
             _nextClaudeUsageCommandUtc = new[] { fiveHourReset, sevenDayReset }
                 .Where(value => value is not null && value > now)
                 .OrderBy(value => value)
@@ -362,18 +366,21 @@ public sealed class UsageReaderService : IDisposable
                 return false;
             }
             output = process.StandardOutput.ReadToEnd();
-            TraceClaude($"exit={process.ExitCode} output={output.Replace("\r", " ").Replace("\n", " | ")}");
-            return process.ExitCode == 0 && !string.IsNullOrWhiteSpace(output);
+            var exitCode = process.ExitCode;
+            TraceClaude($"exit={exitCode} output={output.Replace("\r", " ").Replace("\n", " | ")}");
+            return exitCode == 0 && !string.IsNullOrWhiteSpace(output);
         }
         catch (Exception error) { TraceClaude($"exception={error}"); return false; }
         finally
         {
             lock (_claudeUsageCommandLock)
             {
-                if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
+                try
                 {
-                    try { _activeClaudeProcess.Kill(entireProcessTree: true); } catch { }
+                    if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
+                        _activeClaudeProcess.Kill(entireProcessTree: true);
                 }
+                catch { }
                 _activeClaudeProcess = null;
             }
         }
@@ -429,8 +436,12 @@ public sealed class UsageReaderService : IDisposable
         fiveHourReset = null;
         sevenDayReset = null;
 
-        var session = Regex.Match(output, @"Current session:\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+(?<reset>[A-Za-z]{3}\s+\d{1,2},\s+\d{1,2}:\d{2}[ap]m)\s+\((?<zone>[^)]+)\)", RegexOptions.IgnoreCase);
-        var week = Regex.Match(output, @"Current week \(all models\):\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+(?<reset>[A-Za-z]{3}\s+\d{1,2},\s+\d{1,2}:\d{2}[ap]m)\s+\((?<zone>[^)]+)\)", RegexOptions.IgnoreCase);
+        // Claude may add terminal control characters when invoked through cmd.exe.
+        output = Regex.Replace(output, @"\x1B(?:\[[0-9;?]*[ -/]*[@-~])", "");
+        const string resetPattern = @"(?<reset>[A-Za-z]{3}\s+\d{1,2},\s+\d{1,2}(?::\d{2})?[ap]m)(?:\s+\((?<zone>[^)]+)\))?";
+        var options = RegexOptions.IgnoreCase | RegexOptions.Singleline;
+        var session = Regex.Match(output, $@"Current\s+session\s*:\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+{resetPattern}", options);
+        var week = Regex.Match(output, $@"Current\s+week\s+\(all\s+models\)\s*:\s*(?<percent>[0-9]+(?:\.[0-9]+)?)%.*?resets\s+{resetPattern}", options);
         if (!session.Success || !week.Success ||
             !double.TryParse(session.Groups["percent"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out fiveHourUsed) ||
             !double.TryParse(week.Groups["percent"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out sevenDayUsed)) return false;
@@ -442,10 +453,14 @@ public sealed class UsageReaderService : IDisposable
 
     private static DateTimeOffset? ParseClaudeReset(string text, string zoneName)
     {
+        if (Regex.IsMatch(text, @",\s*\d{1,2}\s*[ap]m$", RegexOptions.IgnoreCase))
+            text = Regex.Replace(text, @",\s*(?<hour>\d{1,2})\s*(?<ampm>[ap]m)$", ",${hour}:00${ampm}", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, "am$", "AM", RegexOptions.IgnoreCase);
         text = Regex.Replace(text, "pm$", "PM", RegexOptions.IgnoreCase);
         if (!DateTime.TryParseExact(text, "MMM d, h:mmtt", CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out var localTime)) return null;
-        var windowsZone = zoneName.Equals("Asia/Taipei", StringComparison.OrdinalIgnoreCase) ? "Taipei Standard Time" : zoneName;
+        var windowsZone = string.IsNullOrWhiteSpace(zoneName) || zoneName.Equals("Asia/Taipei", StringComparison.OrdinalIgnoreCase)
+            ? "Taipei Standard Time"
+            : zoneName;
         try
         {
             var zone = TimeZoneInfo.FindSystemTimeZoneById(windowsZone);
