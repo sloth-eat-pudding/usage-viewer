@@ -25,6 +25,8 @@ public sealed class UsageReaderService : IDisposable
     private volatile bool _disposed;
     private int _refreshRunning;
     private int _codexDirty = 1;
+    private DateTimeOffset _nextCodexPollUtc = DateTimeOffset.MinValue;
+    private static readonly TimeSpan CodexPollInterval = TimeSpan.FromSeconds(10);
 
     public UsageReaderService()
     {
@@ -42,6 +44,7 @@ public sealed class UsageReaderService : IDisposable
                 _codexWatcher.Created += MarkCodexDirty;
                 _codexWatcher.Changed += MarkCodexDirty;
                 _codexWatcher.Renamed += MarkCodexDirty;
+                _codexWatcher.Error += MarkCodexDirty;
             }
             catch { _codexWatcher = null; }
         }
@@ -61,11 +64,18 @@ public sealed class UsageReaderService : IDisposable
     }
 
     private void MarkCodexDirty(object? sender, FileSystemEventArgs e) => Volatile.Write(ref _codexDirty, 1);
+    private void MarkCodexDirty(object? sender, ErrorEventArgs e) => Volatile.Write(ref _codexDirty, 1);
 
     private void WriteCodex()
     {
-        // If monitoring is unavailable, keep the old polling behavior as a fallback.
-        if (_codexWatcher is not null && Interlocked.Exchange(ref _codexDirty, 0) == 0) return;
+        // The watcher makes normal updates cheap, but it can lose events when its
+        // internal buffer overflows or a file is replaced while being written.
+        // Keep a periodic full scan so one missed event cannot permanently freeze
+        // the displayed usage.
+        var now = DateTimeOffset.UtcNow;
+        var dirty = Interlocked.Exchange(ref _codexDirty, 0) != 0;
+        if (_codexWatcher is not null && !dirty && now < _nextCodexPollUtc) return;
+        _nextCodexPollUtc = now + CodexPollInterval;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
         var latest = FindLatestCodexUsage(root);
         if (latest is null) return;

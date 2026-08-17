@@ -155,7 +155,6 @@ function findLatestUsageSessionsByMode(root) {
       mtimeMs: fs.statSync(file).mtimeMs
     }))
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
-    .slice(0, 80)
 
   const latestByMode = {}
 
