@@ -57,9 +57,24 @@ jobs:
           $repository = "${{ github.repository }}"
           $archiveName = "${{ env.ARCHIVE_NAME }}"
 
-          gh release view $tag --repo $repository *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $archiveName --repo $repository --clobber
-          } else {
-            gh release create $tag $archiveName --repo $repository --verify-tag --title "Usage Viewer $tag" --generate-notes
+          $maxAttempts = 5
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            gh release view $tag --repo $repository *> $null
+            if ($LASTEXITCODE -eq 0) {
+              gh release upload $tag $archiveName --repo $repository --clobber
+            } else {
+              gh release create $tag $archiveName --repo $repository --verify-tag --title "Usage Viewer $tag" --generate-notes
+            }
+
+            if ($LASTEXITCODE -eq 0) {
+              exit 0
+            }
+
+            if ($attempt -lt $maxAttempts) {
+              $delay = [math]::Pow(2, $attempt)
+              Write-Host "GitHub Release request failed; retrying in $delay seconds (attempt $attempt/$maxAttempts)."
+              Start-Sleep -Seconds $delay
+            }
           }
+
+          exit 1
