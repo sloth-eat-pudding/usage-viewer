@@ -294,7 +294,19 @@ function parseJsonLine(line) {
 function writeJsonAtomic(filename, value) {
   const temporaryFile = `${filename}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
   try {
-    fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
+    let written = false
+    let lastError
+    for (let attempt = 0; attempt < 8 && !written; attempt += 1) {
+      try {
+        fs.writeFileSync(temporaryFile, JSON.stringify(value, null, 2), 'utf8')
+        written = true
+      } catch (error) {
+        lastError = error
+        if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error
+        waitMilliseconds(75)
+      }
+    }
+    if (!written) throw lastError
     replaceFile(temporaryFile, filename)
   } finally {
     try {
@@ -306,12 +318,21 @@ function writeJsonAtomic(filename, value) {
 }
 
 function replaceFile(temporaryFile, filename) {
-  try {
-    fs.renameSync(temporaryFile, filename)
-    return
-  } catch (error) {
-    if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
-      throw error
+  let lastError
+
+  // UsageViewer.exe may briefly hold the destination while it refreshes.
+  // Windows does not allow replacing an open file, so retry the atomic
+  // rename before falling back to the backup-file path.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      fs.renameSync(temporaryFile, filename)
+      return
+    } catch (error) {
+      lastError = error
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
+        throw error
+      }
+      waitMilliseconds(75)
     }
   }
 
@@ -319,10 +340,10 @@ function replaceFile(temporaryFile, filename) {
 
   try {
     if (fs.existsSync(filename)) {
-      fs.renameSync(filename, backupFile)
+      renameWithRetry(filename, backupFile, lastError)
     }
 
-    fs.renameSync(temporaryFile, filename)
+    renameWithRetry(temporaryFile, filename, lastError)
   } finally {
     try {
       fs.rmSync(backupFile, { force: true })
@@ -330,6 +351,29 @@ function replaceFile(temporaryFile, filename) {
       // Best-effort cleanup.
     }
   }
+}
+
+function renameWithRetry(source, destination, fallbackError) {
+  let lastError = fallbackError
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      fs.renameSync(source, destination)
+      return
+    } catch (error) {
+      lastError = error
+      if (!['EEXIST', 'EPERM', 'EACCES'].includes(error.code)) {
+        throw error
+      }
+      waitMilliseconds(75)
+    }
+  }
+  throw lastError
+}
+
+function waitMilliseconds(milliseconds) {
+  // Synchronous reader: Atomics.wait provides a small blocking delay without
+  // introducing another dependency or changing the CLI's execution model.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds)
 }
 
 function nullableNumber(value) {

@@ -2,6 +2,8 @@ Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 folder = fso.GetParentFolderName(WScript.ScriptFullName)
 overlayPath = folder & "\start-overlay.vbs"
+codexReaderPath = folder & "\start-codex-reader.vbs"
+claudeReaderPath = folder & "\start-claude-desktop-reader.vbs"
 
 ' Stop readers and close Usage Viewer windows from previous launches before
 ' starting fresh processes.
@@ -16,6 +18,11 @@ On Error GoTo 0
 
 cleanupWindows = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " & Chr(34) & "Get-Process | Where-Object { $_.MainWindowTitle -eq 'Usage Viewer' } | Stop-Process -Force" & Chr(34)
 shell.Run cleanupWindows, 0, True
+
+' Keep the shared snapshot files fresh for both the .exe and overlay UI.
+' The reader scripts are lock-protected and poll their source data every two seconds.
+shell.Run "wscript.exe " & Chr(34) & claudeReaderPath & Chr(34), 0, False
+shell.Run "wscript.exe " & Chr(34) & codexReaderPath & Chr(34), 0, False
 
 publishedExe = fso.GetParentFolderName(folder) & "\dist\UsageViewer.exe"
 If fso.FileExists(publishedExe) Then
