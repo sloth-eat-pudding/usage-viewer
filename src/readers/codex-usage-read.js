@@ -67,12 +67,9 @@ function buildCodexSnapshot(usageSession, sourceMode) {
   const info = payload.info || {}
   const lastUsage = info.last_token_usage || {}
   const totalUsage = info.total_token_usage || {}
-  const rateLimits = payload.rate_limits || {}
-  const primaryLimit = rateLimits.primary || {}
+  // Codex Desktop stores rate_limits beside payload, not inside payload.
+  const rateLimits = tokenCount.rate_limits || {}
   const lastTotalTokens = toNumber(lastUsage.total_tokens)
-  const primaryUsed = nullableNumber(primaryLimit.used_percent)
-  const primaryWindowMinutes = nullableNumber(primaryLimit.window_minutes)
-  const fiveHourLimit = findRateLimitWindow(rateLimits, 300)
   const sevenDayLimit = findRateLimitWindow(rateLimits, 10080)
 
   const inputTokens = toNumber(lastUsage.input_tokens)
@@ -128,20 +125,21 @@ function buildCodexSnapshot(usageSession, sourceMode) {
       context_used: null,
       context_remaining: null,
       cached_input: inputTokens > 0 ? (cachedInputTokens / inputTokens) * 100 : 0,
-      five_hour_used: nullableNumber(fiveHourLimit.used_percent),
+      // Codex Desktop exposes the weekly window only.
+      five_hour_used: null,
       seven_day_used: nullableNumber(sevenDayLimit.used_percent),
-      primary_limit_used: primaryUsed
+      primary_limit_used: nullableNumber(sevenDayLimit.used_percent)
     },
     cost: {
       session_usd: 0,
       turn_usd: 0
     },
     rate_limits: {
-      primary_window_minutes: primaryWindowMinutes,
+      primary_window_minutes: nullableNumber(sevenDayLimit.window_minutes),
       plan_type: nullableString(rateLimits.plan_type),
     },
     resets_at: {
-      five_hour_epoch_seconds: nullableNumber(fiveHourLimit.resets_at),
+      five_hour_epoch_seconds: null,
       seven_day_epoch_seconds: nullableNumber(sevenDayLimit.resets_at)
     }
   }
@@ -252,7 +250,7 @@ function classifySourceMode(sessionMeta) {
 }
 
 function hasDirectRateLimitUsage(event) {
-  const rateLimits = event && event.payload && event.payload.rate_limits
+  const rateLimits = event && event.rate_limits
   return ['primary', 'secondary'].some(name =>
     nullableNumber(rateLimits && rateLimits[name] && rateLimits[name].used_percent) !== null)
 }

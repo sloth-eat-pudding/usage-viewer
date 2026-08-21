@@ -19,14 +19,16 @@ On Error GoTo 0
 cleanupWindows = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command " & Chr(34) & "Get-Process | Where-Object { $_.MainWindowTitle -eq 'Usage Viewer' } | Stop-Process -Force" & Chr(34)
 shell.Run cleanupWindows, 0, True
 
-' Keep the shared snapshot files fresh for both the .exe and overlay UI.
-' The reader scripts are lock-protected and poll their source data every two seconds.
-shell.Run "wscript.exe " & Chr(34) & claudeReaderPath & Chr(34), 0, False
-shell.Run "wscript.exe " & Chr(34) & codexReaderPath & Chr(34), 0, False
-
 publishedExe = fso.GetParentFolderName(folder) & "\dist\UsageViewer.exe"
 If fso.FileExists(publishedExe) Then
+  ' UsageViewer.exe already contains the Claude and Codex readers.
+  ' Do not start the external readers as well: both processes would write the
+  ' same snapshot files and make the displayed timestamps jump.
   shell.Run Chr(34) & publishedExe & Chr(34), 0, False
 Else
+  ' The PowerShell overlay has no built-in readers, so start them only in this
+  ' fallback path.
+  shell.Run "wscript.exe " & Chr(34) & claudeReaderPath & Chr(34), 0, False
+  shell.Run "wscript.exe " & Chr(34) & codexReaderPath & Chr(34), 0, False
   shell.Run "wscript.exe " & Chr(34) & overlayPath & Chr(34), 0, False
 End If

@@ -97,9 +97,8 @@ public sealed class UsageReaderService : IDisposable
         var cached = Number(last, "cached_input_tokens");
         var output = Number(last, "output_tokens");
         var totalTokens = Number(last, "total_tokens");
-        var rateLimits = payload.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == JsonValueKind.Object ? rl : default;
-        var primary = rateLimits.ValueKind != JsonValueKind.Undefined && rateLimits.TryGetProperty("primary", out var p) ? p : default;
-        var fiveHour = FindRateLimitWindow(rateLimits, 300);
+        // Codex Desktop stores rate_limits beside payload, not inside payload.
+        var rateLimits = latest.Json.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == JsonValueKind.Object ? rl : default;
         var sevenDay = FindRateLimitWindow(rateLimits, 10080);
 
         WriteJson(fileName, new {
@@ -109,16 +108,17 @@ public sealed class UsageReaderService : IDisposable
             percentages = new {
                 context_used = (double?)null,
                 cached_input = input > 0 ? cached * 100 / input : 0,
-                five_hour_used = NumberOrNull(fiveHour, "used_percent"),
+                // Codex Desktop exposes the weekly window only.
+                five_hour_used = (double?)null,
                 seven_day_used = NumberOrNull(sevenDay, "used_percent"),
-                primary_limit_used = NumberOrNull(primary, "used_percent")
+                primary_limit_used = NumberOrNull(sevenDay, "used_percent")
             },
             resets_at = new {
-                five_hour_epoch_seconds = NumberOrNull(fiveHour, "resets_at"),
+                five_hour_epoch_seconds = (double?)null,
                 seven_day_epoch_seconds = NumberOrNull(sevenDay, "resets_at")
             },
             rate_limits = new {
-                primary_window_minutes = NumberOrNull(primary, "window_minutes"),
+                primary_window_minutes = NumberOrNull(sevenDay, "window_minutes"),
                 plan_type = StringOrNull(rateLimits, "plan_type")
             }
         });
@@ -138,13 +138,15 @@ public sealed class UsageReaderService : IDisposable
         }
         catch { return null; }
 
-        foreach (var item in files)
-        {
-            var candidate = ReadCodexUsageFile(item.File, item.Mtime);
-            if (candidate is not null) return candidate;
-        }
-
-        return null;
+        // Scan every date directory and choose by the event timestamp, rather
+        // than by the containing file's mtime. This remains correct when Codex
+        // creates a new YYYY\\MM\\DD directory or appends to an older file.
+        return files
+            .Select(item => ReadCodexUsageFile(item.File, item.Mtime))
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!.Value)
+            .OrderByDescending(candidate => candidate.Time)
+            .FirstOrDefault();
     }
 
     private static CodexCandidate? ReadCodexUsageFile(string file, DateTimeOffset fallbackTime)
@@ -182,15 +184,14 @@ public sealed class UsageReaderService : IDisposable
 
             if (sessionMeta is null || latestUsage is null) return null;
             var mode = ClassifyCodexMode(sessionMeta.Value);
-            return mode is null ? null : new CodexCandidate(file, fallbackTime, latestUsage.Value, mode);
+            return mode is null ? null : new CodexCandidate(file, latestUsageTime, latestUsage.Value, mode);
         }
         catch { return null; }
     }
 
     private static bool HasDirectRateLimitUsage(JsonElement root)
     {
-        if (!root.TryGetProperty("payload", out var payload) ||
-            !payload.TryGetProperty("rate_limits", out var rateLimits) ||
+        if (!root.TryGetProperty("rate_limits", out var rateLimits) ||
             rateLimits.ValueKind != JsonValueKind.Object) return false;
 
         foreach (var name in new[] { "primary", "secondary" })
