@@ -11,6 +11,7 @@ const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
 
 const SESSIONS_DIRECTORY = path.join(CODEX_HOME, 'sessions')
+const REMOTE_SESSIONS_DIRECTORY = path.join(USAGE_VIEWER_HOME, 'remote-codex', 'sessions')
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CODEX_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-latest.json')
 const CODEX_APP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-app-latest.json')
@@ -35,7 +36,10 @@ try {
 }
 
 function readCodexUsageByMode() {
-  const usageSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
+  const usageSessions = mergeUsageSessions(
+    findLatestUsageSessionsByMode(SESSIONS_DIRECTORY),
+    findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
+  )
   const desktop = usageSessions.desktop
     ? buildCodexSnapshot(usageSessions.desktop, 'desktop')
     : null
@@ -56,6 +60,18 @@ function readCodexUsageByMode() {
   }
 }
 
+function mergeUsageSessions(...sources) {
+  const merged = {}
+  for (const source of sources) {
+    for (const mode of ['desktop', 'cli']) {
+      if (source[mode] && (!merged[mode] || source[mode].tokenTime > merged[mode].tokenTime)) {
+        merged[mode] = source[mode]
+      }
+    }
+  }
+  return merged
+}
+
 function buildCodexSnapshot(usageSession, sourceMode) {
   const sessionFile = usageSession.sessionFile
   const sourceFileMtime = new Date(usageSession.mtimeMs).toISOString()
@@ -68,7 +84,7 @@ function buildCodexSnapshot(usageSession, sourceMode) {
   const lastUsage = info.last_token_usage || {}
   const totalUsage = info.total_token_usage || {}
   // Codex Desktop stores rate_limits beside payload, not inside payload.
-  const rateLimits = tokenCount.rate_limits || {}
+  const rateLimits = tokenCount.rate_limits || (tokenCount.payload && tokenCount.payload.rate_limits) || {}
   const lastTotalTokens = toNumber(lastUsage.total_tokens)
   const sevenDayLimit = findRateLimitWindow(rateLimits, 10080)
 
@@ -148,16 +164,27 @@ function buildCodexSnapshot(usageSession, sourceMode) {
 function findLatestUsageSessionsByMode(root) {
   const files = [...walkFiles(root)]
     .filter(file => file.endsWith('.jsonl'))
-    .map(file => ({
-      file,
-      mtimeMs: fs.statSync(file).mtimeMs
-    }))
+    .map(file => {
+      try {
+        return { file, mtimeMs: fs.statSync(file).mtimeMs }
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
 
   const latestByMode = {}
 
   for (const item of files) {
-    const parsed = readUsageSessionFile(item.file)
+    let parsed
+    try {
+      parsed = readUsageSessionFile(item.file)
+    } catch {
+      // SCP may be replacing this file at the same time. Skip it and retry
+      // during the next reader pass instead of aborting the whole scan.
+      continue
+    }
 
     if (!parsed || !parsed.tokenCount) {
       continue
@@ -250,7 +277,7 @@ function classifySourceMode(sessionMeta) {
 }
 
 function hasDirectRateLimitUsage(event) {
-  const rateLimits = event && event.rate_limits
+  const rateLimits = event && (event.rate_limits || (event.payload && event.payload.rate_limits))
   return ['primary', 'secondary'].some(name =>
     nullableNumber(rateLimits && rateLimits[name] && rateLimits[name].used_percent) !== null)
 }

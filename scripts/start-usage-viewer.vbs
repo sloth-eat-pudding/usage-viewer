@@ -4,6 +4,7 @@ folder = fso.GetParentFolderName(WScript.ScriptFullName)
 overlayPath = folder & "\start-overlay.vbs"
 codexReaderPath = folder & "\start-codex-reader.vbs"
 claudeReaderPath = folder & "\start-claude-desktop-reader.vbs"
+remoteSyncPath = folder & "\sync-codex-remote.ps1"
 
 ' Stop readers and close Usage Viewer windows from previous launches before
 ' starting fresh processes.
@@ -28,6 +29,9 @@ If fso.FileExists(publishedExe) Then
 Else
   ' The PowerShell overlay has no built-in readers, so start them only in this
   ' fallback path.
+  If fso.FileExists(remoteSyncPath) Then
+    shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & remoteSyncPath & Chr(34), 0, False
+  End If
   shell.Run "wscript.exe " & Chr(34) & claudeReaderPath & Chr(34), 0, False
   shell.Run "wscript.exe " & Chr(34) & codexReaderPath & Chr(34), 0, False
   shell.Run "wscript.exe " & Chr(34) & overlayPath & Chr(34), 0, False

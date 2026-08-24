@@ -52,3 +52,13 @@ powershell -ExecutionPolicy Bypass -File packaging\\build-msix.ps1
 ```
 
 資料會寫入 `%USERPROFILE%\.usage-viewer`。若要讓 Claude Code 寫入 usage，將 `config/settings.json` 的設定合併到 `%USERPROFILE%\.claude\settings.json`，並確認路徑指向本專案的 `src\readers\statusline-usage-capture.js`。
+
+若 Codex 使用遠端 session，請將遠端產生的最新 usage snapshot 同步到 `%USERPROFILE%\.usage-viewer\codex-remote-latest.json`。Viewer 會比較 snapshot 的 `observed_at`，自動顯示本機或遠端較新的資料。檔案格式沿用 `codex-app-latest.json`，至少需要包含 `observed_at`（ISO 8601）、`percentages`、`resets_at` 三個欄位。
+
+可使用 `scripts\sync-codex-remote.ps1` 自動同步。腳本目前已設定連線到 `jerry@192.168.2.57`，只會透過 SCP 複製遠端 `~/.codex/sessions`，遠端不需要安裝 Python、Node.js 或本專案。
+
+Usage Viewer 啟動時會自動在背景啟動這個同步器，關閉 Viewer 時也會一併停止；不需要另外手動執行 PowerShell。重新啟動 Viewer 後即可套用設定。
+
+SSH 私鑰與連接埠是選填參數：`SshKeyPath` 預設為空，會使用 SSH 預設認證方式；`SshPort` 預設為 `22`，只有改成其他數字時才會加上 `-P` 參數。若兩者維持預設值，就不會額外啟用任何 SSH 選項。
+
+連線參數直接放在 repo 的 `config\remote.env`，程式啟動的同步器會讀取它，設定值會覆蓋腳本預設值。請先複製 `config\remote.env.example` 為 `config\remote.env` 再修改。支援 `REMOTE_USER`、`REMOTE_HOST`、`POLL_SECONDS`、`SSH_KEY_PATH`、`SSH_PORT` 與 `REMOTE_SESSIONS_PATH`；未設定的項目會保留預設值。`config\remote.env` 已加入 `.gitignore`，不會被追蹤。

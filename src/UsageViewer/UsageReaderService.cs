@@ -22,6 +22,7 @@ public sealed class UsageReaderService : IDisposable
     private readonly Timer _timer;
     private readonly FileSystemWatcher? _codexWatcher;
     private Process? _activeClaudeProcess;
+    private Process? _remoteSyncProcess;
     private volatile bool _disposed;
     private int _refreshRunning;
     private int _codexDirty = 1;
@@ -49,6 +50,7 @@ public sealed class UsageReaderService : IDisposable
             catch { _codexWatcher = null; }
         }
         _timer = new Timer(_ => Refresh(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
+        StartRemoteSync();
     }
 
     private void Refresh()
@@ -66,6 +68,24 @@ public sealed class UsageReaderService : IDisposable
     private void MarkCodexDirty(object? sender, FileSystemEventArgs e) => Volatile.Write(ref _codexDirty, 1);
     private void MarkCodexDirty(object? sender, ErrorEventArgs e) => Volatile.Write(ref _codexDirty, 1);
 
+    private void StartRemoteSync()
+    {
+        try
+        {
+            var script = Path.Combine(AppContext.BaseDirectory, "scripts", "sync-codex-remote.ps1");
+            if (!File.Exists(script)) return;
+            _remoteSyncProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory
+            });
+        }
+        catch (Exception error) { TraceClaude($"remote sync start failed={error.Message}"); }
+    }
+
     private void WriteCodex()
     {
         // The watcher makes normal updates cheap, but it can lose events when its
@@ -78,13 +98,64 @@ public sealed class UsageReaderService : IDisposable
         _nextCodexPollUtc = now + CodexPollInterval;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
         var latest = FindLatestCodexUsage(root);
-        if (latest is null) return;
+        var remoteLatest = FindLatestCodexUsage(Path.Combine(_home, "remote-codex", "sessions"));
+        if (remoteLatest is not null && (latest is null || remoteLatest.Value.Time > latest.Value.Time))
+            latest = remoteLatest;
+        if (latest is null)
+        {
+            PromoteRemoteCodexSnapshot();
+            return;
+        }
 
         if (latest.Value.Mode.Equals("desktop", StringComparison.OrdinalIgnoreCase))
             WriteCodexSnapshot("codex-desktop-latest.json", latest.Value);
         if (latest.Value.Mode.Equals("cli", StringComparison.OrdinalIgnoreCase))
             WriteCodexSnapshot("codex-cli-latest.json", latest.Value);
         WriteCodexSnapshot("codex-app-latest.json", latest.Value);
+        PromoteRemoteCodexSnapshot();
+    }
+
+    private void PromoteRemoteCodexSnapshot()
+    {
+        var remotePath = Path.Combine(_home, "codex-remote-latest.json");
+        if (!File.Exists(remotePath)) return;
+
+        try
+        {
+            using var remoteDocument = JsonDocument.Parse(File.ReadAllText(remotePath));
+            var remote = remoteDocument.RootElement;
+            if (!remote.TryGetProperty("resets_at", out _) ||
+                !remote.TryGetProperty("percentages", out _)) return;
+
+            var remoteObserved = ReadSnapshotTime(remote, "observed_at") ??
+                                 ReadSnapshotTime(remote, "generated_at");
+            if (remoteObserved is null) return;
+
+            var localPath = Path.Combine(_home, "codex-app-latest.json");
+            if (File.Exists(localPath))
+            {
+                using var localDocument = JsonDocument.Parse(File.ReadAllText(localPath));
+                var local = localDocument.RootElement;
+                var localObserved = ReadSnapshotTime(local, "observed_at") ??
+                                     ReadSnapshotTime(local, "generated_at");
+                if (localObserved is not null && localObserved >= remoteObserved) return;
+            }
+
+            WriteJson("codex-app-latest.json", remote.Clone());
+        }
+        catch (Exception error)
+        {
+            TraceClaude($"remote codex snapshot ignored={error.Message}");
+        }
+    }
+
+    private static DateTimeOffset? ReadSnapshotTime(JsonElement root, string property)
+    {
+        return root.TryGetProperty(property, out var value) &&
+               value.ValueKind == JsonValueKind.String &&
+               DateTimeOffset.TryParse(value.GetString(), out var parsed)
+            ? parsed
+            : null;
     }
 
     private void WriteCodexSnapshot(string fileName, CodexCandidate latest)
@@ -98,7 +169,11 @@ public sealed class UsageReaderService : IDisposable
         var output = Number(last, "output_tokens");
         var totalTokens = Number(last, "total_tokens");
         // Codex Desktop stores rate_limits beside payload, not inside payload.
-        var rateLimits = latest.Json.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == JsonValueKind.Object ? rl : default;
+        var rateLimits = latest.Json.TryGetProperty("rate_limits", out var rl) && rl.ValueKind == JsonValueKind.Object
+            ? rl
+            : latest.Json.TryGetProperty("payload", out var nestedPayload) && nestedPayload.TryGetProperty("rate_limits", out var nestedRl) && nestedRl.ValueKind == JsonValueKind.Object
+                ? nestedRl
+                : default;
         var sevenDay = FindRateLimitWindow(rateLimits, 10080);
 
         WriteJson(fileName, new {
@@ -191,8 +266,12 @@ public sealed class UsageReaderService : IDisposable
 
     private static bool HasDirectRateLimitUsage(JsonElement root)
     {
-        if (!root.TryGetProperty("rate_limits", out var rateLimits) ||
-            rateLimits.ValueKind != JsonValueKind.Object) return false;
+        var rateLimits = root.TryGetProperty("rate_limits", out var direct) && direct.ValueKind == JsonValueKind.Object
+            ? direct
+            : root.TryGetProperty("payload", out var payload) && payload.TryGetProperty("rate_limits", out var nested)
+                ? nested
+                : default;
+        if (rateLimits.ValueKind != JsonValueKind.Object) return false;
 
         foreach (var name in new[] { "primary", "secondary" })
         {
@@ -694,6 +773,13 @@ public sealed class UsageReaderService : IDisposable
             }
             catch { }
             _activeClaudeProcess = null;
+            try
+            {
+                if (_remoteSyncProcess is not null && !_remoteSyncProcess.HasExited)
+                    _remoteSyncProcess.Kill(entireProcessTree: true);
+            }
+            catch { }
+            _remoteSyncProcess = null;
         }
         _timer.Dispose();
         if (_codexWatcher is not null)

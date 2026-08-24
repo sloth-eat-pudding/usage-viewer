@@ -11,5 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Resource Include="usage-viewer.ico" />
+    <None Include="..\..\scripts\sync-codex-remote.ps1" Link="scripts\sync-codex-remote.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <None Include="..\..\config\remote.env" Link="config\remote.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
   </ItemGroup>
 </Project>
