@@ -12,6 +12,7 @@
   <ItemGroup>
     <Resource Include="usage-viewer.ico" />
     <None Include="..\..\scripts\sync-codex-remote.ps1" Link="scripts\sync-codex-remote.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
-    <None Include="..\..\config\remote.env" Link="config\remote.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <!-- remote.env is an optional, machine-specific file and is gitignored. -->
+    <None Include="..\..\config\remote.env" Link="config/remote.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" Condition="Exists('..\..\config\remote.env')" />
   </ItemGroup>
 </Project>
