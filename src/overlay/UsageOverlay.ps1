@@ -23,6 +23,7 @@ using System.Windows.Forms;
 
 public class ResizableOverlayForm : Form
 {
+  public static bool ClickThrough { get; set; }
   private const int WM_NCHITTEST = 0x84;
   private const int HTCLIENT = 1;
   private const int HTLEFT = 10;
@@ -37,6 +38,11 @@ public class ResizableOverlayForm : Form
 
   protected override void WndProc(ref Message message)
   {
+    if (ClickThrough && message.Msg == WM_NCHITTEST)
+    {
+      message.Result = (IntPtr)(-1);
+      return;
+    }
     base.WndProc(ref message);
 
     if (message.Msg != WM_NCHITTEST || (int)message.Result != HTCLIENT)
@@ -64,6 +70,8 @@ public class ResizableOverlayForm : Form
 public static class OverlayWindowInterop
 {
   public const int WM_NCLBUTTONDOWN = 0xA1;
+  [System.Runtime.InteropServices.DllImport("user32.dll")]
+  public static extern short GetAsyncKeyState(int key);
 
   [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
   public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);
@@ -182,6 +190,26 @@ $resetButton.Add_Click({
 })
 $panel.Controls.Add($resetButton)
 
+<<<<<<< HEAD
+=======
+$script:IsPinned = $false
+$script:pinHotkeyWasDown = $false
+$normalPanelColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
+
+$pinButton = New-Object System.Windows.Forms.Button
+$pinButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$pinButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$pinButton.FlatAppearance.BorderSize = 0
+$pinButton.BackColor = $normalPanelColor
+$pinButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
+$pinButton.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
+$pinButton.Location = New-Object System.Drawing.Point(212, 2)
+$pinButton.Size = New-Object System.Drawing.Size(20, 20)
+$pinButton.Text = "P"
+$pinButton.TabStop = $false
+$panel.Controls.Add($pinButton)
+
+>>>>>>> 575b2ea (Add pinned overlay and flexible source grouping)
 $settingsButton = New-Object System.Windows.Forms.Button
 $settingsButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $settingsButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
@@ -209,6 +237,25 @@ $closeButton.Text = "X"
 $closeButton.TabStop = $false
 $closeButton.Add_Click({ $form.Close() })
 $panel.Controls.Add($closeButton)
+
+$applyPinState = {
+  [ResizableOverlayForm]::ClickThrough = $script:IsPinned
+  $pinButton.Visible = -not $script:IsPinned
+  $settingsButton.Visible = -not $script:IsPinned
+  $resetButton.Visible = -not $script:IsPinned
+  $closeButton.Visible = -not $script:IsPinned
+  if ($script:IsPinned) {
+    $panel.BackColor = $form.TransparencyKey
+    $form.BackColor = $form.TransparencyKey
+  } else {
+    $panel.BackColor = $normalPanelColor
+    $form.BackColor = [System.Drawing.Color]::Transparent
+  }
+}
+$pinButton.Add_Click({
+  $script:IsPinned = -not $script:IsPinned
+  & $applyPinState
+})
 
 $title = New-Object System.Windows.Forms.Label
 $title.AutoSize = $false
@@ -257,6 +304,7 @@ $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 13)
   $main.Width = $width
   $detail.Width = $width
+  $pinButton.Left = $panel.ClientSize.Width - 128
   $resetButton.Left = $panel.ClientSize.Width - 44
   $closeButton.Left = $panel.ClientSize.Width - 22
 }
@@ -360,6 +408,14 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
 $timer.Add_Tick({
   try {
+    $pinHotkeyDown = (([OverlayWindowInterop]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) -and
+      (([OverlayWindowInterop]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) -and
+      (([OverlayWindowInterop]::GetAsyncKeyState(0x50) -band 0x8000) -ne 0)
+    if ($pinHotkeyDown -and -not $script:pinHotkeyWasDown) {
+      $script:IsPinned = -not $script:IsPinned
+      & $applyPinState
+    }
+    $script:pinHotkeyWasDown = $pinHotkeyDown
     Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
     Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
   } catch {
