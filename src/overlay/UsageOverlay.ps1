@@ -24,7 +24,6 @@ using System.Windows.Forms;
 public class ResizableOverlayForm : Form
 {
   public static bool ClickThrough { get; set; }
-  public static Rectangle UnlockButtonBounds { get; set; }
   private const int WM_NCHITTEST = 0x84;
   private const int HTCLIENT = 1;
   private const int HTLEFT = 10;
@@ -41,12 +40,8 @@ public class ResizableOverlayForm : Form
   {
     if (ClickThrough && message.Msg == WM_NCHITTEST)
     {
-      Point screenPoint = Cursor.Position;
-      if (!UnlockButtonBounds.Contains(screenPoint))
-      {
-        message.Result = (IntPtr)(-1);
-        return;
-      }
+      message.Result = (IntPtr)(-1);
+      return;
     }
     base.WndProc(ref message);
 
@@ -248,18 +243,16 @@ $applyPinState = {
   [ResizableOverlayForm]::ClickThrough = $script:IsPinned
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
-  $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
+  $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
   $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
   $costToggle.Enabled = -not $script:IsPinned
-  # Locking must keep the usage content visible. Only interaction is locked;
-  # the panel and form retain their normal colors.
-  $panel.BackColor = $normalPanelColor
+  # U mode is a text-only, click-through overlay. The content remains visible
+  # while the panel and button backgrounds use the keyed transparent color.
+  $panel.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
-  $pinScreenLocation = $form.PointToScreen($pinButton.Location)
-  [ResizableOverlayForm]::UnlockButtonBounds = New-Object System.Drawing.Rectangle($pinScreenLocation, $pinButton.Size)
 }
 $pinButton.Add_Click({
   $script:IsPinned = -not $script:IsPinned
