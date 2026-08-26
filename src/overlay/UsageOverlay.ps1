@@ -133,6 +133,8 @@ $script:ShowSsh = $true
 $script:MergeCodex = $false
 $script:ClaudeDesktopGroup = "Group 1"
 $script:ClaudeCliGroup = "Group 1"
+$script:ClaudeCustomPath = ""
+$script:ClaudeCustomGroup = "Group 1"
 $script:CodexDesktopGroup = "Group 1"
 $script:CodexCliGroup = "Group 1"
 $script:CodexSshGroup = "Group 2"
@@ -149,6 +151,8 @@ if (Test-Path -LiteralPath $displaySettingsFile) {
     if ($null -ne $savedSettings.merge_codex) { $script:MergeCodex = [bool]$savedSettings.merge_codex }
     if ($savedSettings.claude_desktop_group) { $script:ClaudeDesktopGroup = [string]$savedSettings.claude_desktop_group }
     if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = [string]$savedSettings.claude_cli_group }
+    if ($savedSettings.claude_custom_path) { $script:ClaudeCustomPath = [string]$savedSettings.claude_custom_path }
+    if ($savedSettings.claude_custom_group) { $script:ClaudeCustomGroup = [string]$savedSettings.claude_custom_group }
     if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = [string]$savedSettings.codex_desktop_group }
     if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = [string]$savedSettings.codex_cli_group }
     if ($savedSettings.codex_ssh_group) { $script:CodexSshGroup = [string]$savedSettings.codex_ssh_group }
@@ -543,6 +547,29 @@ function Update-UsageView {
   }
 }
 
+function Read-ClaudePlanUsageJson {
+  param([string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $null }
+  try {
+    $root = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    if ($null -eq $root.samples -or @($root.samples).Count -eq 0) { return $null }
+    $sample = @($root.samples | Sort-Object { [int64]$_.t })[-1]
+    [pscustomobject]@{
+      percentages = [pscustomobject]@{
+        five_hour_used = [double]$sample.u.fh
+        seven_day_used = [double]$sample.u.sd
+      }
+      resets_at = [pscustomobject]@{
+        five_hour_epoch_seconds = $null
+        seven_day_epoch_seconds = $null
+      }
+      source = "claude-custom-plan-usage-history"
+      source_mode = "desktop"
+      source_file = $Path
+    }
+  } catch { return $null }
+}
+
 function Update-CombinedUsageView {
   param(
     [string]$ClaudeUsageFile,
@@ -556,6 +583,7 @@ function Update-CombinedUsageView {
   $claudeSources = @()
   if ($script:ClaudeDesktopGroup -ne "Hidden") { $claudeSources += @{ Label = "D"; Group = $script:ClaudeDesktopGroup; Data = (Read-UsageJson $claudeDesktopUsageFile) } }
   if ($script:ClaudeCliGroup -ne "Hidden") { $claudeSources += @{ Label = "C"; Group = $script:ClaudeCliGroup; Data = (Read-UsageJson $claudeCliUsageFile) } }
+  if ($script:ClaudeCustomPath -and $script:ClaudeCustomGroup -ne "Hidden") { $claudeSources += @{ Label = "Custom"; Group = $script:ClaudeCustomGroup; Data = (Read-ClaudePlanUsageJson $script:ClaudeCustomPath) } }
   $claudeSources = @($claudeSources | Where-Object { $null -ne $_.Data })
 
   $codexSources = @()
@@ -1006,6 +1034,31 @@ function Show-DisplaySettings {
   $claudeCli.SelectedIndex = [Math]::Max(0, $claudeCli.Items.IndexOf($script:ClaudeCliGroup))
   $dialog.Controls.Add($claudeCli)
 
+  $claudeCustomLabel = New-Object System.Windows.Forms.Label
+  $claudeCustomLabel.Text = "Custom"
+  $claudeCustomLabel.Location = New-Object System.Drawing.Point(20, 126)
+  $claudeCustomLabel.AutoSize = $true
+  $dialog.Controls.Add($claudeCustomLabel)
+  $claudeCustom = New-Object System.Windows.Forms.ComboBox
+  $claudeCustom.Location = New-Object System.Drawing.Point(170, 120)
+  $claudeCustom.Size = New-Object System.Drawing.Size(90, 24)
+  $claudeCustom.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$claudeCustom.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $claudeCustom.SelectedIndex = [Math]::Max(0, $claudeCustom.Items.IndexOf($script:ClaudeCustomGroup))
+  $dialog.Controls.Add($claudeCustom)
+  $addClaudePath = New-Object System.Windows.Forms.Button
+  $addClaudePath.Text = "Add path"
+  $addClaudePath.Location = New-Object System.Drawing.Point(265, 120)
+  $addClaudePath.Size = New-Object System.Drawing.Size(70, 24)
+  $addClaudePath.Add_Click({
+    $picker = New-Object System.Windows.Forms.OpenFileDialog
+    $picker.Filter = "Claude usage history (plan-usage-history.json)|plan-usage-history.json|JSON files (*.json)|*.json"
+    $picker.FileName = "plan-usage-history.json"
+    if ($picker.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:ClaudeCustomPath = $picker.FileName }
+    $picker.Dispose()
+  })
+  $dialog.Controls.Add($addClaudePath)
+
   $codexLabel = New-Object System.Windows.Forms.Label
   $codexLabel.Text = "Codex sources"
   $codexLabel.Location = New-Object System.Drawing.Point(15, 132)
@@ -1108,6 +1161,7 @@ function Show-DisplaySettings {
   if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     $script:ClaudeDesktopGroup = [string]$claudeDesktop.SelectedItem
     $script:ClaudeCliGroup = [string]$claudeCli.SelectedItem
+    $script:ClaudeCustomGroup = [string]$claudeCustom.SelectedItem
     $script:CodexDesktopGroup = [string]$codexDesktop.SelectedItem
     $script:CodexCliGroup = [string]$codexCli.SelectedItem
     $script:CodexSshGroup = [string]$ssh.SelectedItem
@@ -1115,12 +1169,16 @@ function Show-DisplaySettings {
     @{
       claude_desktop_group = $script:ClaudeDesktopGroup
       claude_cli_group = $script:ClaudeCliGroup
+      claude_custom_path = $script:ClaudeCustomPath
+      claude_custom_group = $script:ClaudeCustomGroup
       codex_desktop_group = $script:CodexDesktopGroup
       codex_cli_group = $script:CodexCliGroup
       codex_ssh_group = $script:CodexSshGroup
       claude_user_environment = $script:ClaudeUserEnvironment
     } |
       ConvertTo-Json | Set-Content -LiteralPath $displaySettingsFile -Encoding UTF8
+    @{ path = $script:ClaudeCustomPath } |
+      ConvertTo-Json | Set-Content -LiteralPath (Join-Path $usageHome "claude-custom-source.json") -Encoding UTF8
     Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
     Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
   }
@@ -1159,7 +1217,7 @@ function Start-ClaudeUserEnvironment {
       $app = Get-StartApps | Where-Object { $_.Name -eq "Claude" } | Select-Object -First 1
       if ($null -eq $app) { throw "Claude Start Menu app was not found." }
       Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\$($app.AppID)"
-      $StatusLabel.Text = "Current: $environmentLabel — opened Claude Default."
+       $StatusLabel.Text = "Current: ${environmentLabel}: opened Claude Default."
       return
     }
 
@@ -1168,7 +1226,7 @@ function Start-ClaudeUserEnvironment {
     $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Self"
     New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
     Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profileDirectory`""
-    $StatusLabel.Text = "Current: $environmentLabel — opened Claude Self. Sign in once to save this session."
+    $StatusLabel.Text = "Current: ${environmentLabel}: opened Claude Self. Sign in once to save this session."
   } catch {
     $StatusLabel.Text = "Unable to open Claude: $($_.Exception.Message)"
   }

@@ -284,6 +284,7 @@ public sealed class UsageReaderService : IDisposable
 
     private void WriteClaude()
     {
+        WriteConfiguredClaudeSource();
         if (TryWriteClaudeUsageFromCommand()) return;
 
         var cliSource = Path.Combine(_home, "claude-statusline-latest.json");
@@ -540,13 +541,15 @@ public sealed class UsageReaderService : IDisposable
         catch { return null; }
     }
 
-    private ClaudePlanUsage? ReadClaudePlanUsage()
+    private ClaudePlanUsage? ReadClaudePlanUsage() => ReadClaudePlanUsage(_claudePlanUsageHistory);
+
+    private static ClaudePlanUsage? ReadClaudePlanUsage(string? sourcePath)
     {
-        if (_claudePlanUsageHistory is null || !File.Exists(_claudePlanUsageHistory)) return null;
+        if (sourcePath is null || !File.Exists(sourcePath)) return null;
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(_claudePlanUsageHistory));
+            using var document = JsonDocument.Parse(File.ReadAllText(sourcePath));
             if (!document.RootElement.TryGetProperty("samples", out var samples) || samples.ValueKind != JsonValueKind.Array) return null;
 
             var parsed = new List<ClaudePlanSample>();
@@ -573,6 +576,28 @@ public sealed class UsageReaderService : IDisposable
                 EstimateSevenDayReset(parsed));
         }
         catch { return null; }
+    }
+
+    private void WriteConfiguredClaudeSource()
+    {
+        var settingsPath = Path.Combine(_home, "claude-custom-source.json");
+        if (!File.Exists(settingsPath)) return;
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+            var path = StringOrNull(document.RootElement, "path");
+            if (string.IsNullOrWhiteSpace(path)) return;
+            var usage = ReadClaudePlanUsage(path);
+            if (usage is null) return;
+            WriteJson("claude-custom-latest.json", new {
+                generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = usage.ObservedAt.ToString("O"),
+                source = "claude-custom-plan-usage-history", source_mode = "desktop", source_file = path,
+                percentages = new { context_used = (double?)null, five_hour_used = usage.FiveHourUsed, seven_day_used = usage.SevenDayUsed },
+                resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(usage.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(usage.EstimatedSevenDayReset) },
+                reset_is_estimated = new { five_hour = true, seven_day = true }
+            });
+        }
+        catch { }
     }
 
     private static DateTimeOffset? EstimateFiveHourReset(IReadOnlyList<ClaudePlanSample> samples)
