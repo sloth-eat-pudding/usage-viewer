@@ -109,9 +109,20 @@ public sealed class UsageReaderService : IDisposable
         }
         var selectedLocal = localCandidates.OrderByDescending(candidate => candidate.Time).FirstOrDefault();
         if (selectedLocal.File is not null) WriteCodexSnapshot("codex-app-latest.json", selectedLocal);
-        var remoteLatest = FindLatestCodexUsage(Path.Combine(_home, "remote-codex", "sessions"));
-        if (remoteLatest is not null && IsSnapshotNotOlder("codex-remote-latest.json", remoteLatest.Value.Time))
-            WriteCodexSnapshot("codex-remote-latest.json", remoteLatest.Value);
+        var remoteRoot = Path.Combine(_home, "remote-codex");
+        var remoteSources = ReadConfiguredSources("remote-sources.json");
+        for (var index = 0; index < remoteSources.Count; index++)
+        {
+            var remoteLatest = FindLatestCodexUsage(Path.Combine(remoteRoot, index.ToString(), "sessions"));
+            if (remoteLatest is not null && IsSnapshotNotOlder($"codex-remote-{index}-latest.json", remoteLatest.Value.Time))
+                WriteCodexSnapshot($"codex-remote-{index}-latest.json", remoteLatest.Value);
+        }
+        if (remoteSources.Count == 0)
+        {
+            var remoteLatest = FindLatestCodexUsage(Path.Combine(remoteRoot, "sessions"));
+            if (remoteLatest is not null && IsSnapshotNotOlder("codex-remote-0-latest.json", remoteLatest.Value.Time))
+                WriteCodexSnapshot("codex-remote-0-latest.json", remoteLatest.Value);
+        }
     }
 
     private bool IsSnapshotNotOlder(string fileName, DateTimeOffset candidateTime)
@@ -585,19 +596,38 @@ public sealed class UsageReaderService : IDisposable
         try
         {
             using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-            var path = StringOrNull(document.RootElement, "path");
-            if (string.IsNullOrWhiteSpace(path)) return;
-            var usage = ReadClaudePlanUsage(path);
-            if (usage is null) return;
-            WriteJson("claude-custom-latest.json", new {
-                generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = usage.ObservedAt.ToString("O"),
-                source = "claude-custom-plan-usage-history", source_mode = "desktop", source_file = path,
-                percentages = new { context_used = (double?)null, five_hour_used = usage.FiveHourUsed, seven_day_used = usage.SevenDayUsed },
-                resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(usage.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(usage.EstimatedSevenDayReset) },
-                reset_is_estimated = new { five_hour = true, seven_day = true }
-            });
+            var sources = document.RootElement.TryGetProperty("sources", out var array) && array.ValueKind == JsonValueKind.Array
+                ? array.EnumerateArray().ToList()
+                : new List<JsonElement> { document.RootElement };
+            for (var index = 0; index < sources.Count; index++)
+            {
+                var path = StringOrNull(sources[index], "path");
+                if (string.IsNullOrWhiteSpace(path)) continue;
+                var usage = ReadClaudePlanUsage(path);
+                if (usage is null) continue;
+                WriteJson($"claude-custom-{index}-latest.json", new {
+                    generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = usage.ObservedAt.ToString("O"),
+                    source = "claude-custom-plan-usage-history", source_mode = "desktop", source_file = path,
+                    percentages = new { context_used = (double?)null, five_hour_used = usage.FiveHourUsed, seven_day_used = usage.SevenDayUsed },
+                    resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(usage.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(usage.EstimatedSevenDayReset) },
+                    reset_is_estimated = new { five_hour = true, seven_day = true }
+                });
+            }
         }
         catch { }
+    }
+
+    private List<JsonElement> ReadConfiguredSources(string fileName)
+    {
+        try
+        {
+            var path = Path.Combine(_home, fileName);
+            if (!File.Exists(path)) return new();
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            return document.RootElement.TryGetProperty("sources", out var array) && array.ValueKind == JsonValueKind.Array
+                ? array.EnumerateArray().Select(item => item.Clone()).ToList() : new();
+        }
+        catch { return new(); }
     }
 
     private static DateTimeOffset? EstimateFiveHourReset(IReadOnlyList<ClaudePlanSample> samples)

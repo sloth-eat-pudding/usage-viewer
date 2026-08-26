@@ -124,6 +124,7 @@ $codexDesktopUsageFile = Join-Path $usageHome "codex-desktop-latest.json"
 $codexCliUsageFile = Join-Path $usageHome "codex-cli-latest.json"
 $codexRemoteUsageFile = Join-Path $usageHome "codex-remote-latest.json"
 $displaySettingsFile = Join-Path $usageHome "display-settings.json"
+$remoteSourcesFile = Join-Path $usageHome "remote-sources.json"
 $script:ShowClaudeDesktop = $true
 $script:ShowClaudeCli = $true
 $script:MergeClaude = $true
@@ -131,13 +132,15 @@ $script:ShowCodexDesktop = $true
 $script:ShowCodexCli = $true
 $script:ShowSsh = $true
 $script:MergeCodex = $false
-$script:ClaudeDesktopGroup = "Group 1"
-$script:ClaudeCliGroup = "Group 1"
+$script:ClaudeDesktopGroup = "1"
+$script:ClaudeCliGroup = "1"
 $script:ClaudeCustomPath = ""
-$script:ClaudeCustomGroup = "Group 1"
-$script:CodexDesktopGroup = "Group 1"
-$script:CodexCliGroup = "Group 1"
-$script:CodexSshGroup = "Group 2"
+$script:ClaudeCustomGroup = "1"
+$script:ClaudeCustomSources = @()
+$script:CodexSshSources = @()
+$script:CodexDesktopGroup = "1"
+$script:CodexCliGroup = "1"
+$script:CodexSshGroup = "2"
 $script:ClaudeUserEnvironment = "default"
 if (Test-Path -LiteralPath $displaySettingsFile) {
   try {
@@ -153,11 +156,36 @@ if (Test-Path -LiteralPath $displaySettingsFile) {
     if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = [string]$savedSettings.claude_cli_group }
     if ($savedSettings.claude_custom_path) { $script:ClaudeCustomPath = [string]$savedSettings.claude_custom_path }
     if ($savedSettings.claude_custom_group) { $script:ClaudeCustomGroup = [string]$savedSettings.claude_custom_group }
+    if ($savedSettings.PSObject.Properties.Name -contains "claude_custom_sources") { $script:ClaudeCustomSources = @($savedSettings.claude_custom_sources) }
     if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = [string]$savedSettings.codex_desktop_group }
     if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = [string]$savedSettings.codex_cli_group }
     if ($savedSettings.codex_ssh_group) { $script:CodexSshGroup = [string]$savedSettings.codex_ssh_group }
-    if ($savedSettings.claude_user_environment -in @("default", "self")) { $script:ClaudeUserEnvironment = [string]$savedSettings.claude_user_environment }
+    if ($savedSettings.PSObject.Properties.Name -contains "codex_ssh_sources") { $script:CodexSshSources = @($savedSettings.codex_ssh_sources) }
+    if ($savedSettings.claude_user_environment) {
+      $script:ClaudeUserEnvironment = if ([string]$savedSettings.claude_user_environment -eq "self") { "default" } else { [string]$savedSettings.claude_user_environment }
+    }
   } catch { }
+}
+
+function Convert-GroupCode {
+  param([string]$Value)
+  if ($Value -eq "Hidden") { return "Hidden" }
+  $code = ($Value -replace '^Group\s+', '').Trim()
+  $number = 0
+  if ([int]::TryParse($code, [ref]$number) -and $number -gt 0) { return [string]$number }
+  return "1"
+}
+if ($script:ClaudeCustomSources.Count -eq 0 -and $script:ClaudeCustomPath) {
+  $script:ClaudeCustomSources = @([pscustomobject]@{ name = "Custom 1"; path = $script:ClaudeCustomPath; group = $script:ClaudeCustomGroup })
+}
+$script:ClaudeDesktopGroup = Convert-GroupCode $script:ClaudeDesktopGroup
+$script:ClaudeCliGroup = Convert-GroupCode $script:ClaudeCliGroup
+$script:ClaudeCustomGroup = Convert-GroupCode $script:ClaudeCustomGroup
+$script:CodexDesktopGroup = Convert-GroupCode $script:CodexDesktopGroup
+$script:CodexCliGroup = Convert-GroupCode $script:CodexCliGroup
+$script:CodexSshGroup = Convert-GroupCode $script:CodexSshGroup
+if ($script:CodexSshSources.Count -eq 0 -and (Test-Path -LiteralPath $remoteSourcesFile)) {
+  try { $remoteConfig = Get-Content -LiteralPath $remoteSourcesFile -Raw | ConvertFrom-Json; if ($remoteConfig.sources) { $script:CodexSshSources = @($remoteConfig.sources) } } catch { }
 }
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
 $defaultWindowSize = New-Object System.Drawing.Size(340, 96)
@@ -243,7 +271,9 @@ $settingsButton.Location = New-Object System.Drawing.Point(234, 2)
 $settingsButton.Size = New-Object System.Drawing.Size(50, 20)
 $settingsButton.Text = "Settings"
 $settingsButton.TabStop = $false
-$settingsButton.Add_Click({ Show-DisplaySettings })
+$settingsButton.Add_Click({
+  if (-not (Show-SharedDisplaySettings)) { Show-DisplaySettings }
+})
 $panel.Controls.Add($settingsButton)
 
 $closeButton = New-Object System.Windows.Forms.Button
@@ -333,7 +363,7 @@ $script:showCost = $false
 $script:heightBeforeCostExpand = $null
 
 $layoutOverlay = {
-  $width = [Math]::Max(80, $panel.ClientSize.Width - 13)
+  $width = [Math]::Max(80, $panel.ClientSize.Width - 135)
   $main.Width = $width
   $detail.Width = $width
   $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 128 }
@@ -583,13 +613,25 @@ function Update-CombinedUsageView {
   $claudeSources = @()
   if ($script:ClaudeDesktopGroup -ne "Hidden") { $claudeSources += @{ Label = "D"; Group = $script:ClaudeDesktopGroup; Data = (Read-UsageJson $claudeDesktopUsageFile) } }
   if ($script:ClaudeCliGroup -ne "Hidden") { $claudeSources += @{ Label = "C"; Group = $script:ClaudeCliGroup; Data = (Read-UsageJson $claudeCliUsageFile) } }
-  if ($script:ClaudeCustomPath -and $script:ClaudeCustomGroup -ne "Hidden") { $claudeSources += @{ Label = "Custom"; Group = $script:ClaudeCustomGroup; Data = (Read-ClaudePlanUsageJson $script:ClaudeCustomPath) } }
+  foreach ($custom in $script:ClaudeCustomSources) {
+    $customGroup = Convert-GroupCode $(if ($custom.group) { [string]$custom.group } else { "1" })
+    if ($custom.path -and $customGroup -ne "Hidden") { $claudeSources += @{ Label = if ($custom.name) { [string]$custom.name } else { "Custom" }; Group = $customGroup; Data = (Read-ClaudePlanUsageJson ([string]$custom.path)) } }
+  }
   $claudeSources = @($claudeSources | Where-Object { $null -ne $_.Data })
 
   $codexSources = @()
   if ($script:CodexDesktopGroup -ne "Hidden") { $codexSources += @{ Label = "D"; Group = $script:CodexDesktopGroup; Data = (Read-UsageJson $codexDesktopUsageFile) } }
   if ($script:CodexCliGroup -ne "Hidden") { $codexSources += @{ Label = "C"; Group = $script:CodexCliGroup; Data = (Read-UsageJson $codexCliUsageFile) } }
-  if ($script:CodexSshGroup -ne "Hidden") { $codexSources += @{ Label = "SSH"; Group = $script:CodexSshGroup; Data = (Read-UsageJson $codexRemoteUsageFile) } }
+  if ($script:CodexSshSources.Count -eq 0) {
+    if ($script:CodexSshGroup -ne "Hidden") { $codexSources += @{ Label = "SSH 1"; Group = $script:CodexSshGroup; Data = (Read-UsageJson $codexRemoteUsageFile) } }
+  } else {
+    for ($sshIndex = 0; $sshIndex -lt $script:CodexSshSources.Count; $sshIndex++) {
+      $ssh = $script:CodexSshSources[$sshIndex]
+      $sshGroup = Convert-GroupCode $(if ($ssh.group) { [string]$ssh.group } else { "1" })
+      $sshFile = Join-Path $usageHome "codex-remote-$sshIndex-latest.json"
+      if ($sshGroup -ne "Hidden") { $codexSources += @{ Label = if ($ssh.name) { [string]$ssh.name } else { "SSH $($sshIndex + 1)" }; Group = $sshGroup; Data = (Read-UsageJson $sshFile) } }
+    }
+  }
   $codexSources = @($codexSources | Where-Object { $null -ne $_.Data })
 
   if ($claudeSources.Count -eq 0 -and $codexSources.Count -eq 0) {
@@ -963,7 +1005,77 @@ function Format-ResetSummary {
   return "?"
 }
 
+function Show-SshSourceDialog {
+  $dialog = New-Object System.Windows.Forms.Form
+  $dialog.Text = "Add SSH source"
+  $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $dialog.ClientSize = New-Object System.Drawing.Size(460, 230)
+  $fields = @(
+    @{ label = "Name"; key = "name"; value = "SSH $($script:CodexSshSources.Count + 1)" },
+    @{ label = "User"; key = "user"; value = "" },
+    @{ label = "Host"; key = "host"; value = "" },
+    @{ label = "Port"; key = "port"; value = "22" },
+    @{ label = "Sessions path"; key = "sessions_path"; value = "~/.codex/sessions" }
+  )
+  $boxes = @{}
+  for ($index = 0; $index -lt $fields.Count; $index++) {
+    $label = New-Object System.Windows.Forms.Label; $label.Text = $fields[$index].label; $label.Location = New-Object System.Drawing.Point(15, (15 + $index * 34)); $label.AutoSize = $true; $dialog.Controls.Add($label)
+    $box = New-Object System.Windows.Forms.TextBox; $box.Text = $fields[$index].value; $box.Location = New-Object System.Drawing.Point(135, (12 + $index * 34)); $box.Size = New-Object System.Drawing.Size(300, 24); $dialog.Controls.Add($box); $boxes[$fields[$index].key] = $box
+  }
+  $ok = New-Object System.Windows.Forms.Button; $ok.Text = "Add"; $ok.DialogResult = [System.Windows.Forms.DialogResult]::OK; $ok.Location = New-Object System.Drawing.Point(360, 190); $ok.Size = New-Object System.Drawing.Size(75, 25); $dialog.Controls.Add($ok); $dialog.AcceptButton = $ok
+  if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK -or -not $boxes.host.Text.Trim()) { $dialog.Dispose(); return $null }
+  $result = [pscustomobject]@{ name = $boxes.name.Text.Trim(); user = $boxes.user.Text.Trim(); host = $boxes.host.Text.Trim(); port = [int]$boxes.port.Text; key_path = ""; sessions_path = $boxes.sessions_path.Text.Trim(); group = "1" }
+  $dialog.Dispose()
+  return $result
+}
+
+function Show-SharedDisplaySettings {
+  $settingsExe = Join-Path $PSScriptRoot "..\..\dist\UsageViewer.exe"
+  if (-not (Test-Path -LiteralPath $settingsExe)) { return $false }
+
+  try {
+    Start-Process -FilePath $settingsExe -ArgumentList "--settings" -Wait
+    if (-not (Test-Path -LiteralPath $displaySettingsFile)) { return $true }
+
+    $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
+    if ($savedSettings.claude_desktop_group) { $script:ClaudeDesktopGroup = Convert-GroupCode ([string]$savedSettings.claude_desktop_group) }
+    if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = Convert-GroupCode ([string]$savedSettings.claude_cli_group) }
+    if ($savedSettings.claude_custom_sources) { $script:ClaudeCustomSources = @($savedSettings.claude_custom_sources) }
+    if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = Convert-GroupCode ([string]$savedSettings.codex_desktop_group) }
+    if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = Convert-GroupCode ([string]$savedSettings.codex_cli_group) }
+    if ($savedSettings.codex_ssh_sources) { $script:CodexSshSources = @($savedSettings.codex_ssh_sources) }
+    if ($savedSettings.claude_user_environment) {
+      $script:ClaudeUserEnvironment = if ([string]$savedSettings.claude_user_environment -eq "self") { "default" } else { [string]$savedSettings.claude_user_environment }
+    }
+    foreach ($source in $script:ClaudeCustomSources) { $source.group = Convert-GroupCode ([string]$source.group) }
+    foreach ($source in $script:CodexSshSources) { $source.group = Convert-GroupCode ([string]$source.group) }
+    $script:ClaudeCustomPath = if ($script:ClaudeCustomSources.Count -gt 0) { [string]$script:ClaudeCustomSources[0].path } else { "" }
+    $script:ClaudeCustomGroup = if ($script:ClaudeCustomSources.Count -gt 0) { Convert-GroupCode ([string]$script:ClaudeCustomSources[0].group) } else { "1" }
+    $script:CodexSshGroup = if ($script:CodexSshSources.Count -gt 0) { Convert-GroupCode ([string]$script:CodexSshSources[0].group) } else { "2" }
+
+    Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+    Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Show-DisplaySettings {
+  $allGroupValues = @(
+    $script:ClaudeDesktopGroup
+    $script:ClaudeCliGroup
+    $script:ClaudeCustomGroup
+    $script:CodexDesktopGroup
+    $script:CodexCliGroup
+    $script:CodexSshGroup
+    @($script:ClaudeCustomSources | ForEach-Object { Convert-GroupCode ([string]$_.group) })
+    @($script:CodexSshSources | ForEach-Object { Convert-GroupCode ([string]$_.group) })
+  )
+  $maximumGroup = ($allGroupValues | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Measure-Object -Maximum).Maximum
+  if (-not $maximumGroup -or $maximumGroup -lt 2) { $maximumGroup = 2 }
+  $groupCodes = @((1..$maximumGroup | ForEach-Object { [string]$_ }) + "Hidden")
+
   $dialog = New-Object System.Windows.Forms.Form
   $dialog.Text = "Usage Viewer Settings"
   $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
@@ -975,7 +1087,7 @@ function Show-DisplaySettings {
   $dialog.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
   $dialog.ForeColor = [System.Drawing.Color]::White
   $dialog.Opacity = 0.96
-  $dialog.ClientSize = New-Object System.Drawing.Size(350, 365)
+$dialog.ClientSize = New-Object System.Drawing.Size(350, 485)
 
   $dialogTitle = New-Object System.Windows.Forms.Label
   $dialogTitle.Text = "Display settings"
@@ -1017,7 +1129,7 @@ function Show-DisplaySettings {
   $claudeDesktop.Location = New-Object System.Drawing.Point(170, 64)
   $claudeDesktop.Size = New-Object System.Drawing.Size(150, 24)
   $claudeDesktop.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$claudeDesktop.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$claudeDesktop.Items.AddRange($groupCodes)
   $claudeDesktop.SelectedIndex = [Math]::Max(0, $claudeDesktop.Items.IndexOf($script:ClaudeDesktopGroup))
   $dialog.Controls.Add($claudeDesktop)
 
@@ -1030,7 +1142,7 @@ function Show-DisplaySettings {
   $claudeCli.Location = New-Object System.Drawing.Point(170, 92)
   $claudeCli.Size = New-Object System.Drawing.Size(150, 24)
   $claudeCli.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$claudeCli.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$claudeCli.Items.AddRange($groupCodes)
   $claudeCli.SelectedIndex = [Math]::Max(0, $claudeCli.Items.IndexOf($script:ClaudeCliGroup))
   $dialog.Controls.Add($claudeCli)
 
@@ -1043,7 +1155,7 @@ function Show-DisplaySettings {
   $claudeCustom.Location = New-Object System.Drawing.Point(170, 120)
   $claudeCustom.Size = New-Object System.Drawing.Size(90, 24)
   $claudeCustom.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$claudeCustom.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$claudeCustom.Items.AddRange($groupCodes)
   $claudeCustom.SelectedIndex = [Math]::Max(0, $claudeCustom.Items.IndexOf($script:ClaudeCustomGroup))
   $dialog.Controls.Add($claudeCustom)
   $addClaudePath = New-Object System.Windows.Forms.Button
@@ -1054,81 +1166,131 @@ function Show-DisplaySettings {
     $picker = New-Object System.Windows.Forms.OpenFileDialog
     $picker.Filter = "Claude usage history (plan-usage-history.json)|plan-usage-history.json|JSON files (*.json)|*.json"
     $picker.FileName = "plan-usage-history.json"
-    if ($picker.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:ClaudeCustomPath = $picker.FileName }
+    if ($picker.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+      $newGroup = [string]((@(
+        $script:ClaudeDesktopGroup, $script:ClaudeCliGroup, $script:ClaudeCustomGroup,
+        $script:CodexDesktopGroup, $script:CodexCliGroup, $script:CodexSshGroup
+        @($script:ClaudeCustomSources | ForEach-Object { $_.group })
+        @($script:CodexSshSources | ForEach-Object { $_.group })
+      ) | ForEach-Object { Convert-GroupCode ([string]$_) } | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Measure-Object -Maximum).Maximum + 1)
+      foreach ($selector in @($claudeDesktop, $claudeCli, $claudeCustom, $codexDesktop, $codexCli, $ssh)) {
+        if ($null -ne $selector -and -not $selector.Items.Contains($newGroup)) { [void]$selector.Items.Insert([Math]::Max(0, $selector.Items.Count - 1), $newGroup) }
+      }
+      $sourceName = "Custom $($script:ClaudeCustomSources.Count + 1)"
+      $script:ClaudeCustomSources += [pscustomobject]@{ name = $sourceName; path = $picker.FileName; group = $newGroup }
+      $script:ClaudeCustomPath = $picker.FileName
+      [void]$customSourceList.Items.Add("$($script:ClaudeCustomSources[-1].name): $($picker.FileName)")
+      if ($null -ne $environmentSelector -and -not $environmentSelector.Items.Contains($sourceName)) { [void]$environmentSelector.Items.Add($sourceName) }
+    }
     $picker.Dispose()
   })
   $dialog.Controls.Add($addClaudePath)
+  $customSourceList = New-Object System.Windows.Forms.ListBox
+  $customSourceList.Location = New-Object System.Drawing.Point(20, 148)
+  $customSourceList.Size = New-Object System.Drawing.Size(315, 42)
+  $customSourceList.HorizontalScrollbar = $true
+  foreach ($custom in $script:ClaudeCustomSources) { [void]$customSourceList.Items.Add("$($custom.name): $($custom.path)") }
+  $dialog.Controls.Add($customSourceList)
 
   $codexLabel = New-Object System.Windows.Forms.Label
   $codexLabel.Text = "Codex sources"
-  $codexLabel.Location = New-Object System.Drawing.Point(15, 132)
+  $codexLabel.Location = New-Object System.Drawing.Point(15, 198)
   $codexLabel.AutoSize = $true
   $dialog.Controls.Add($codexLabel)
 
   $codexDesktopLabel = New-Object System.Windows.Forms.Label
   $codexDesktopLabel.Text = "Desktop"
-  $codexDesktopLabel.Location = New-Object System.Drawing.Point(20, 160)
+  $codexDesktopLabel.Location = New-Object System.Drawing.Point(20, 226)
   $codexDesktopLabel.AutoSize = $true
   $dialog.Controls.Add($codexDesktopLabel)
   $codexDesktop = New-Object System.Windows.Forms.ComboBox
-  $codexDesktop.Location = New-Object System.Drawing.Point(170, 154)
+  $codexDesktop.Location = New-Object System.Drawing.Point(170, 220)
   $codexDesktop.Size = New-Object System.Drawing.Size(150, 24)
   $codexDesktop.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$codexDesktop.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$codexDesktop.Items.AddRange($groupCodes)
   $codexDesktop.SelectedIndex = [Math]::Max(0, $codexDesktop.Items.IndexOf($script:CodexDesktopGroup))
   $dialog.Controls.Add($codexDesktop)
 
   $codexCliLabel = New-Object System.Windows.Forms.Label
   $codexCliLabel.Text = "CLI"
-  $codexCliLabel.Location = New-Object System.Drawing.Point(20, 188)
+  $codexCliLabel.Location = New-Object System.Drawing.Point(20, 254)
   $codexCliLabel.AutoSize = $true
   $dialog.Controls.Add($codexCliLabel)
   $codexCli = New-Object System.Windows.Forms.ComboBox
-  $codexCli.Location = New-Object System.Drawing.Point(170, 182)
+  $codexCli.Location = New-Object System.Drawing.Point(170, 248)
   $codexCli.Size = New-Object System.Drawing.Size(150, 24)
   $codexCli.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$codexCli.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$codexCli.Items.AddRange($groupCodes)
   $codexCli.SelectedIndex = [Math]::Max(0, $codexCli.Items.IndexOf($script:CodexCliGroup))
   $dialog.Controls.Add($codexCli)
 
   $sshLabel = New-Object System.Windows.Forms.Label
   $sshLabel.Text = "Remote (SSH)"
-  $sshLabel.Location = New-Object System.Drawing.Point(20, 216)
+  $sshLabel.Location = New-Object System.Drawing.Point(20, 282)
   $sshLabel.AutoSize = $true
   $dialog.Controls.Add($sshLabel)
   $ssh = New-Object System.Windows.Forms.ComboBox
-  $ssh.Location = New-Object System.Drawing.Point(170, 210)
+  $ssh.Location = New-Object System.Drawing.Point(170, 276)
   $ssh.Size = New-Object System.Drawing.Size(150, 24)
   $ssh.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
-  [void]$ssh.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  [void]$ssh.Items.AddRange($groupCodes)
   $ssh.SelectedIndex = [Math]::Max(0, $ssh.Items.IndexOf($script:CodexSshGroup))
   $dialog.Controls.Add($ssh)
+  $addSsh = New-Object System.Windows.Forms.Button
+  $addSsh.Text = "Add"
+  $addSsh.Location = New-Object System.Drawing.Point(265, 276)
+  $addSsh.Size = New-Object System.Drawing.Size(70, 24)
+  $addSsh.Add_Click({
+    $source = Show-SshSourceDialog
+    if ($null -ne $source) {
+      $newGroup = [string]((@(
+        $script:ClaudeDesktopGroup, $script:ClaudeCliGroup, $script:ClaudeCustomGroup,
+        $script:CodexDesktopGroup, $script:CodexCliGroup, $script:CodexSshGroup
+        @($script:ClaudeCustomSources | ForEach-Object { $_.group })
+        @($script:CodexSshSources | ForEach-Object { $_.group })
+      ) | ForEach-Object { Convert-GroupCode ([string]$_) } | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ } | Measure-Object -Maximum).Maximum + 1)
+      $source.group = $newGroup
+      foreach ($selector in @($claudeDesktop, $claudeCli, $claudeCustom, $codexDesktop, $codexCli, $ssh)) {
+        if ($null -ne $selector -and -not $selector.Items.Contains($newGroup)) { [void]$selector.Items.Insert([Math]::Max(0, $selector.Items.Count - 1), $newGroup) }
+      }
+      $script:CodexSshSources += $source
+      [void]$sshSourceList.Items.Add("$($source.name): $($source.user)@$($source.host):$($source.port)")
+    }
+  })
+  $dialog.Controls.Add($addSsh)
+  $sshSourceList = New-Object System.Windows.Forms.ListBox
+  $sshSourceList.Location = New-Object System.Drawing.Point(20, 304)
+  $sshSourceList.Size = New-Object System.Drawing.Size(315, 42)
+  $sshSourceList.HorizontalScrollbar = $true
+  foreach ($sshSource in $script:CodexSshSources) { [void]$sshSourceList.Items.Add("$($sshSource.name): $($sshSource.user)@$($sshSource.host):$($sshSource.port)") }
+  $dialog.Controls.Add($sshSourceList)
 
   $accountLabel = New-Object System.Windows.Forms.Label
   $accountLabel.Text = "Claude user environment"
-  $accountLabel.Location = New-Object System.Drawing.Point(15, 248)
+  $accountLabel.Location = New-Object System.Drawing.Point(15, 360)
   $accountLabel.AutoSize = $true
   $dialog.Controls.Add($accountLabel)
 
-  $defaultAccount = New-Object System.Windows.Forms.Button
-  $defaultAccount.Text = "Open Default"
-  $defaultAccount.Location = New-Object System.Drawing.Point(20, 275)
-  $defaultAccount.Size = New-Object System.Drawing.Size(145, 28)
-  $defaultAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "default" -StatusLabel $accountStatus })
-  $dialog.Controls.Add($defaultAccount)
-
-  $selfAccount = New-Object System.Windows.Forms.Button
-  $selfAccount.Text = "Open Self"
-  $selfAccount.Location = New-Object System.Drawing.Point(175, 275)
-  $selfAccount.Size = New-Object System.Drawing.Size(145, 28)
-  $selfAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "self" -StatusLabel $accountStatus })
-  $dialog.Controls.Add($selfAccount)
+  $environmentSelector = New-Object System.Windows.Forms.ComboBox
+  $environmentSelector.Location = New-Object System.Drawing.Point(20, 387)
+  $environmentSelector.Size = New-Object System.Drawing.Size(220, 28)
+  $environmentSelector.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$environmentSelector.Items.Add("default")
+  foreach ($custom in $script:ClaudeCustomSources) { if ($custom.name) { [void]$environmentSelector.Items.Add([string]$custom.name) } }
+  $environmentSelector.SelectedItem = if ($environmentSelector.Items.Contains($script:ClaudeUserEnvironment)) { $script:ClaudeUserEnvironment } else { "default" }
+  $dialog.Controls.Add($environmentSelector)
+  $openEnvironment = New-Object System.Windows.Forms.Button
+  $openEnvironment.Text = "Open"
+  $openEnvironment.Location = New-Object System.Drawing.Point(250, 387)
+  $openEnvironment.Size = New-Object System.Drawing.Size(85, 28)
+  $openEnvironment.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName ([string]$environmentSelector.SelectedItem) -StatusLabel $accountStatus })
+  $dialog.Controls.Add($openEnvironment)
 
   $accountStatus = New-Object System.Windows.Forms.Label
-  $currentEnvironmentLabel = if ($script:ClaudeUserEnvironment -eq "self") { "Self account" } else { "Default account" }
-  $currentEnvironmentFolder = if ($script:ClaudeUserEnvironment -eq "self") { "Claude-Self" } else { "Claude" }
+  $currentEnvironmentLabel = $script:ClaudeUserEnvironment
+  $currentEnvironmentFolder = if ($script:ClaudeUserEnvironment -eq "default") { "Claude" } else { "Claude-$($script:ClaudeUserEnvironment -replace '[^A-Za-z0-9_-]', '')" }
   $accountStatus.Text = "Current: $currentEnvironmentLabel  |  Folder: $currentEnvironmentFolder"
-  $accountStatus.Location = New-Object System.Drawing.Point(20, 309)
+  $accountStatus.Location = New-Object System.Drawing.Point(20, 421)
   $accountStatus.Size = New-Object System.Drawing.Size(305, 20)
   $accountStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
   $dialog.Controls.Add($accountStatus)
@@ -1136,7 +1298,7 @@ function Show-DisplaySettings {
   $save = New-Object System.Windows.Forms.Button
   $save.Text = "Save"
   $save.DialogResult = [System.Windows.Forms.DialogResult]::OK
-  $save.Location = New-Object System.Drawing.Point(255, 334)
+  $save.Location = New-Object System.Drawing.Point(255, 460)
   $save.Size = New-Object System.Drawing.Size(75, 25)
   $dialog.AcceptButton = $save
   $dialog.Controls.Add($save)
@@ -1151,7 +1313,7 @@ function Show-DisplaySettings {
   $save.FlatAppearance.BorderSize = 0
   $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
   $save.ForeColor = [System.Drawing.Color]::White
-  foreach ($button in @($defaultAccount, $selfAccount)) {
+  foreach ($button in @($openEnvironment)) {
     $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $button.FlatAppearance.BorderSize = 0
     $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
@@ -1159,6 +1321,7 @@ function Show-DisplaySettings {
   }
 
   if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    $script:ClaudeUserEnvironment = [string]$environmentSelector.SelectedItem
     $script:ClaudeDesktopGroup = [string]$claudeDesktop.SelectedItem
     $script:ClaudeCliGroup = [string]$claudeCli.SelectedItem
     $script:ClaudeCustomGroup = [string]$claudeCustom.SelectedItem
@@ -1171,14 +1334,18 @@ function Show-DisplaySettings {
       claude_cli_group = $script:ClaudeCliGroup
       claude_custom_path = $script:ClaudeCustomPath
       claude_custom_group = $script:ClaudeCustomGroup
+      claude_custom_sources = @($script:ClaudeCustomSources)
       codex_desktop_group = $script:CodexDesktopGroup
       codex_cli_group = $script:CodexCliGroup
       codex_ssh_group = $script:CodexSshGroup
+      codex_ssh_sources = @($script:CodexSshSources)
       claude_user_environment = $script:ClaudeUserEnvironment
     } |
       ConvertTo-Json | Set-Content -LiteralPath $displaySettingsFile -Encoding UTF8
-    @{ path = $script:ClaudeCustomPath } |
-      ConvertTo-Json | Set-Content -LiteralPath (Join-Path $usageHome "claude-custom-source.json") -Encoding UTF8
+    @{ sources = @($script:ClaudeCustomSources) } |
+      ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $usageHome "claude-custom-source.json") -Encoding UTF8
+    @{ sources = @($script:CodexSshSources) } |
+      ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $remoteSourcesFile -Encoding UTF8
     Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
     Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
   }
@@ -1206,7 +1373,7 @@ function Get-ClaudeDesktopExecutable {
 
 function Start-ClaudeUserEnvironment {
   param(
-    [ValidateSet("default", "self")][string]$EnvironmentName,
+    [string]$EnvironmentName,
     [System.Windows.Forms.Label]$StatusLabel
   )
 
@@ -1223,10 +1390,11 @@ function Start-ClaudeUserEnvironment {
 
     $executable = Get-ClaudeDesktopExecutable
     if ([string]::IsNullOrWhiteSpace($executable)) { throw "Claude.exe was not found." }
-    $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Self"
+    $profileName = if ($EnvironmentName -eq "self") { "Claude-Self" } else { "Claude-" + ($EnvironmentName -replace '[^A-Za-z0-9_-]', '') }
+    $profileDirectory = Join-Path $env:LOCALAPPDATA $profileName
     New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
     Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profileDirectory`""
-    $StatusLabel.Text = "Current: ${environmentLabel}: opened Claude Self. Sign in once to save this session."
+    $StatusLabel.Text = "Current: ${EnvironmentName}: opened Claude profile."
   } catch {
     $StatusLabel.Text = "Unable to open Claude: $($_.Exception.Message)"
   }
