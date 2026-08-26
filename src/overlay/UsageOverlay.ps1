@@ -103,7 +103,6 @@ public static class OverlayWindowInterop
 $HWND_TOPMOST = [IntPtr](-1)
 $SWP_NOSIZE = 0x0001
 $SWP_NOMOVE = 0x0002
-$SWP_NOACTIVATE = 0x0010
 
 $usageHome = $env:USAGE_VIEWER_HOME
 if ([string]::IsNullOrWhiteSpace($usageHome)) {
@@ -259,7 +258,7 @@ $applyPinState = {
   [ResizableOverlayForm]::ClickThrough = $script:IsPinned
   $form.TopMost = $true
   if ($script:IsPinned) {
-    [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE -bor $SWP_NOACTIVATE) | Out-Null
+    [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE) | Out-Null
   }
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
@@ -436,13 +435,18 @@ function Get-ResizeHitTest {
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
+$form.Add_Shown({
+  if ($script:IsPinned) {
+    [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE) | Out-Null
+  }
+})
 $timer.Add_Tick({
   try {
     if ($script:IsPinned -and -not $form.TopMost) {
       $form.TopMost = $true
     }
     if ($script:IsPinned) {
-      [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE -bor $SWP_NOACTIVATE) | Out-Null
+      [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE) | Out-Null
     }
     $pinHotkeyDown = (([OverlayWindowInterop]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) -and
       (([OverlayWindowInterop]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) -and
