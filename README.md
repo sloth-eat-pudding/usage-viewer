@@ -1,89 +1,114 @@
 # Usage Viewer
 
-Windows 使用量浮窗，支援 Claude Code、Claude Desktop 與 Codex。現在已開始提供具備獨立工作列身份的 `UsageViewer.exe`，並準備 MSIX 封裝流程。
+Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量與重置時間。支援 Claude Desktop、Claude Code、Codex Desktop、Codex CLI，以及可選的遠端 Codex session 同步。
+
+## 執行模式
+
+專案提供兩個彼此獨立的執行方式；兩者共用 `%USERPROFILE%\.usage-viewer` 的 snapshot 與顯示設定。
+
+| 模式 | 入口 | Reader | 適用情境 |
+| --- | --- | --- | --- |
+| WPF 桌面程式 | `UsageViewer.exe` 或 `scripts\start-wpf-usage-viewer.cmd` | 內建 C# reader | 一般使用與 GitHub Release；self-contained exe 不需安裝 .NET 或 Node.js。 |
+| PowerShell overlay | `scripts\start-usage-viewer.cmd` | Node.js readers + PowerShell overlay | 開發、除錯，或要直接使用腳本版浮窗時。 |
+
+兩條路徑不會互相啟動；請一次只使用其中一種。`scripts\restart-usage-viewer.cmd` 用於重新啟動目前開發中的 PowerShell overlay、readers 與遠端同步器。
+
+## 直接使用
+
+從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`，解壓縮後直接執行 `UsageViewer.exe`。
+
+exe 會在背景讀取本機 Claude/Codex session，並把資料寫入 `%USERPROFILE%\.usage-viewer`。右上角按鈕功能如下：
+
+- `P`：釘選浮窗並讓其餘區域點擊穿透；按 `U` 解除。
+- `Settings`：選擇要顯示的來源、群組與自訂 Claude history 檔案。
+- `×`：結束 viewer 與它啟動的背景 reader。
+
+## 來源與顯示設定
+
+Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`；Codex 來源包括 Desktop、CLI 與遠端 SSH。每一個來源都可在 Settings 中設定為：
+
+- `Group 1`、`Group 2` 或 `Group 3`：同一產品中相同群組的來源會合併成一行，並採用該群組最新的 snapshot。
+- `Hidden`：不顯示該來源。
+
+因此可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存在 `%USERPROFILE%\.usage-viewer\display-settings.json`，兩種模式都會套用。自訂 Claude history 的路徑也會寫入 `%USERPROFILE%\.usage-viewer\claude-custom-source.json`，供 WPF reader 產生 `claude-custom-latest.json`。
+
+## 資料檔案
+
+所有 snapshot 都位於 `%USERPROFILE%\.usage-viewer`。主要檔案如下：
+
+| 檔案 | 來源 |
+| --- | --- |
+| `claude-desktop-latest.json` | Claude Desktop session/history |
+| `claude-statusline-latest.json` | Claude Code status line |
+| `claude-custom-latest.json` | Settings 指定的 Claude history |
+| `codex-desktop-latest.json` | Codex Desktop session |
+| `codex-cli-latest.json` | Codex CLI session |
+| `codex-remote-latest.json` | 同步到本機的遠端 Codex session |
+
+每份 snapshot 都保留來源、觀測時間、5h/7d 百分比與重置時間。遠端 Codex snapshot 使用時間單調保護，避免同步到較舊 session 時覆寫較新的資料。
+
+## Claude Code status line
+
+將 [`config/settings.json`](config/settings.json) 的 `statusLine` 設定合併到 `%USERPROFILE%\.claude\settings.json`，並把 command 中的路徑改成此專案內 `src\readers\statusline-usage-capture.js` 的實際絕對路徑。
+
+## 遠端 Codex 同步（可選）
+
+複製 `config\remote.env.example` 為 `config\remote.env`，再填入你的 SSH 連線資訊：
+
+```powershell
+Copy-Item config\remote.env.example config\remote.env
+```
+
+支援 `REMOTE_USER`、`REMOTE_HOST`、`POLL_SECONDS`、`SSH_KEY_PATH`、`SSH_PORT` 與 `REMOTE_SESSIONS_PATH`。同步器只透過 SCP 複製遠端 `.codex/sessions` 到本機快取；遠端主機不需要安裝此專案。
+
+`config\remote.env` 是個人機器設定，已加入 `.gitignore`。WPF publish 時若此檔存在，會一併帶到 publish 輸出，供 exe 的背景同步器讀取。
+
+## 開發
+
+```powershell
+# 啟動腳本版 overlay + Node readers
+.\scripts\start-usage-viewer.cmd
+
+# 重新啟動腳本版 viewer（修改後使用）
+.\scripts\restart-usage-viewer.cmd
+
+# 停止腳本版 readers
+.\scripts\stop-readers.cmd
+```
+
+修改 reader、overlay、WPF UI 或設定後，先做適當的語法／建置檢查，再執行 `scripts\restart-usage-viewer.cmd`。WPF 與腳本 reader 都必須維持相同的 snapshot 格式與來源分組語意。
+
+## 建置與發布
+
+本機 publish：
+
+```powershell
+dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:SatelliteResourceLanguages=en -o dist
+```
+
+之後可使用 `scripts\start-wpf-usage-viewer.cmd` 啟動 `dist\UsageViewer.exe`。
+
+如需 MSIX，先完成 publish 並安裝 Windows SDK，再執行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1
+```
+
+推送 `v` 開頭的 tag 會觸發 GitHub Actions，產生 Windows x64 self-contained exe 的 ZIP、上傳 artifact，並建立或更新 GitHub Release：
+
+```powershell
+git tag v0.0.10
+git push origin v0.0.10
+```
 
 ## 專案結構
 
 ```text
-assets/                 視窗圖示
-config/                 Claude Code 設定範例
-scripts/                Windows CMD / VBS 啟動器
-src/overlay/             PowerShell 浮窗
-src/readers/             Claude / Codex 資料 reader 與 statusline
-packaging/               MSIX manifest、圖示與封裝腳本
+src/UsageViewer/       WPF exe 與內建 C# reader
+src/overlay/           PowerShell overlay
+src/readers/           Node.js readers 與 Claude Code status line capture
+scripts/               啟動、停止、重啟與 SSH 同步腳本
+config/                Claude Code 範例與機器專屬遠端設定範本
+packaging/             MSIX manifest、資產與封裝腳本
+.github/workflows/     tag 觸發的 Windows release build
 ```
-
-## 啟動
-
-從 `scripts` 資料夾執行：
-
-- `start-usage-viewer.cmd`：獨立的 PowerShell overlay + readers 入口
-- `start-wpf-usage-viewer.cmd`：獨立啟動已 publish 的 WPF `UsageViewer.exe`
-- `start-overlay.cmd`：只啟動浮窗
-- `start-claude-desktop-reader.cmd` / `start-codex-reader.cmd`：只啟動 reader
-- `stop-readers.cmd`：停止 Claude 與 Codex reader
-
-兩個入口互不依賴，但共用 `%USERPROFILE%\.usage-viewer` 內的 usage snapshot；overlay 入口不會啟動或檢查 WPF `.exe`。
-
-## 開發修改後的驗證流程
-
-修改 reader、overlay 或 WPF Viewer 後，需同步確認兩種執行路徑：Node/C# reader 都要寫入相同的 Desktop、CLI、SSH snapshot；PowerShell overlay 與 WPF Viewer 都要使用相同的 Combined/Separate 顯示規則。完成檢查後，重新執行 `scripts\restart-usage-viewer.cmd`，讓目前使用者直接看到最新結果。Overlay 的顯示選項由右上角 `Settings` 設定。
-
-也可以直接執行 `scripts\restart-usage-viewer.cmd`；它會重新啟動使用量 viewer，方便在修改完成後立即查看最新畫面。
-
-重啟腳本 `restart-usage-viewer.ps1` 會清理所有舊程序，並直接啟動最新的 overlay、readers 與 SSH synchronizer，不依賴 `start-usage-viewer.vbs` 的啟動鏈，避免多個舊 overlay 殘留造成看到舊畫面。
-
-PowerShell overlay 另有具名 mutex 單一執行個體鎖；即使啟動器被重複執行，也只允許一個 Usage Viewer 顯示器存在。
-
-Overlay 高度會依主內容與重置時間的實際行數自動調整，並保留字型下緣與視窗底部 padding，避免最後一行重置時間被裁切。
-
-SSH snapshot 採用單調時間保護：只有 `observed_at` 不早於目前 `codex-remote-latest.json` 的候選資料才能覆寫。SCP 同步期間若暫時只看到舊 session，Node 與 C# reader 都會保留上一份較新的有效 snapshot，避免 SSH 用量在不同歷史 session 間跳動。
-
-## 直接下載
-
-沒有 .NET SDK 或編譯環境的使用者，請從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`，解壓縮後直接執行 `UsageViewer.exe`。Release 內的 EXE 是 self-contained 版本，不需要另外安裝 .NET 或 Node.js。
-
-## 發布版本
-
-推送以 `v` 開頭的 tag 時，GitHub Actions 會自動建置 Windows x64 self-contained EXE、壓縮成 ZIP，並建立或更新該 tag 的 GitHub Release：
-
-```powershell
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-建置結果也會保留在該次 Actions run 的 Artifacts 中。
-
-## 建置桌面 App
-
-```powershell
-dotnet publish src\\UsageViewer\\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:SatelliteResourceLanguages=en -o dist
-```
-
-MSIX 封裝需要 Windows SDK 的 `makeappx.exe`：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File packaging\\build-msix.ps1
-```
-
-資料會寫入 `%USERPROFILE%\.usage-viewer`。若要讓 Claude Code 寫入 usage，將 `config/settings.json` 的設定合併到 `%USERPROFILE%\.claude\settings.json`，並確認路徑指向本專案的 `src\readers\statusline-usage-capture.js`。
-
-Codex usage 會依來源分開寫入 `%USERPROFILE%\.usage-viewer`：`codex-desktop-latest.json`、`codex-cli-latest.json`、`codex-remote-latest.json`。三者都包含獨立的 `observed_at`、`percentages.five_hour_used`、`percentages.seven_day_used`、`resets_at.five_hour_epoch_seconds` 與 `resets_at.seven_day_epoch_seconds`，不會把 Desktop、CLI、SSH 的使用量混在一起。`codex-app-latest.json` 保留為相容輸出，代表最新的本機 Desktop/CLI 資料，不包含 SSH。
-
-目前兩種執行方式都會同步產生上述檔案：直接執行 `src\readers\codex-usage-read.js` 的 Node reader，以及 Usage Viewer 內建的 C#/WPF reader。Desktop 與 CLI 視為同一個本機 Codex；`Combined` 顯示合併後的本機 Codex，`Separate` 則顯示本機與遠端兩行，遠端來源只在該行最末尾標示 `(SSH)`。每個 Codex 行固定顯示 `7d` 與 `5h`，資料缺失時顯示 `-`。
-
-`scripts\start-usage-viewer.cmd` 是獨立的 PowerShell overlay 入口，不依賴也不會啟動 `dist\UsageViewer.exe`。WPF 桌面程式是另一條獨立路徑，使用 `scripts\start-wpf-usage-viewer.cmd` 啟動；兩者共用 snapshot，但不互相依賴。
-
-PowerShell overlay 與 WPF `UsageViewer.exe` 的右上角 `Settings` 都會開啟自由來源群組設定頁。Claude Desktop/CLI 與 Codex Desktop/CLI/remote（SSH）各自可指定 `Group 1`、`Group 2`、`Group 3` 或 `Hidden`；同一產品中指定到相同 Group 的來源會合併，不同 Group 各自顯示。這可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存到 `%USERPROFILE%\.usage-viewer\display-settings.json`，兩種執行方式共用並自動套用。WPF Settings 選擇自訂 Claude history 後，也會同步更新內建 reader 使用的 `claude-custom-source.json`。
-
-設定頁採用與主 overlay 一致的深色無框、扁平按鈕與右上角關閉鍵風格。
-
-Windows 的 Settings 另有 `Claude user environment`：`Open Default` 透過目前安裝的 Start Menu Claude 啟動預設帳號；`Open Work` 會動態尋找 Store/MSIX 或傳統安裝的 Claude.exe，並以 `%LOCALAPPDATA%\Claude-Work` 作為獨立 `--user-data-dir`。兩個環境各自保存登入 Cookie、session 與設定，不需反覆登出登入。
-
-可使用 `scripts\sync-codex-remote.ps1` 自動同步。腳本目前已設定連線到 `jerry@192.168.2.57`，只會透過 SCP 複製遠端 `~/.codex/sessions`，遠端不需要安裝 Python、Node.js 或本專案。
-
-Usage Viewer 啟動時會自動在背景啟動這個同步器，關閉 Viewer 時也會一併停止；不需要另外手動執行 PowerShell。重新啟動 Viewer 後即可套用設定。
-
-SSH 私鑰與連接埠是選填參數：`SshKeyPath` 預設為空，會使用 SSH 預設認證方式；`SshPort` 預設為 `22`，只有改成其他數字時才會加上 `-P` 參數。若兩者維持預設值，就不會額外啟用任何 SSH 選項。
-
-連線參數直接放在 repo 的 `config\remote.env`，程式啟動的同步器會讀取它，設定值會覆蓋腳本預設值。請先複製 `config\remote.env.example` 為 `config\remote.env` 再修改。支援 `REMOTE_USER`、`REMOTE_HOST`、`POLL_SECONDS`、`SSH_KEY_PATH`、`SSH_PORT` 與 `REMOTE_SESSIONS_PATH`；未設定的項目會保留預設值。`config\remote.env` 已加入 `.gitignore`，不會被追蹤。

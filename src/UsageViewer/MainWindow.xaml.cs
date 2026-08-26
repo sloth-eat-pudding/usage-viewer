@@ -18,18 +18,28 @@ public partial class MainWindow : Window
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpNoOwnerZOrder = 0x0200;
+    private const int WmNcHitTest = 0x0084;
+    private const nint HtTransparent = -1;
+    private const nint HtClient = 1;
 
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly UsageReaderService _reader = new();
     private DisplaySettings _displaySettings = DisplaySettings.Default;
+    private HwndSource? _windowSource;
+    private bool _isPinned;
 
     public MainWindow()
     {
         InitializeComponent();
         LoadWindowState();
         LoadDisplaySettings();
-        SourceInitialized += (_, _) => EnsureTopmost();
+        SourceInitialized += (_, _) =>
+        {
+            _windowSource = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+            _windowSource?.AddHook(WindowMessageHook);
+            EnsureTopmost();
+        };
         Activated += (_, _) => EnsureTopmost();
         Deactivated += (_, _) => Dispatcher.BeginInvoke(EnsureTopmost, DispatcherPriority.Background);
         _timer.Tick += (_, _) =>
@@ -201,7 +211,33 @@ public partial class MainWindow : Window
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed) DragMove();
+        if (!_isPinned && e.ButtonState == MouseButtonState.Pressed) DragMove();
+    }
+
+    private void OnPinClick(object sender, RoutedEventArgs e)
+    {
+        _isPinned = !_isPinned;
+        PinButton.Content = _isPinned ? "U" : "P";
+        PinButton.ToolTip = _isPinned ? "解除釘選" : "釘選並讓其他區域點擊穿透";
+        PinButton.Background = _isPinned
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(45, 75, 45))
+            : System.Windows.Media.Brushes.Transparent;
+        OverlayBorder.Background = _isPinned ? System.Windows.Media.Brushes.Transparent : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(232, 23, 23, 23));
+        OverlayBorder.BorderBrush = _isPinned ? System.Windows.Media.Brushes.Transparent : System.Windows.Media.Brushes.DimGray;
+        SettingsButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
+        CloseButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
+        EnsureTopmost();
+    }
+
+    private nint WindowMessageHook(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
+    {
+        if (!_isPinned || message != WmNcHitTest) return IntPtr.Zero;
+        var x = unchecked((short)(long)lParam);
+        var y = unchecked((short)((long)lParam >> 16));
+        var pinTopLeft = PinButton.PointToScreen(new Point(0, 0));
+        var pinBounds = new Rect(pinTopLeft, new Size(PinButton.ActualWidth, PinButton.ActualHeight));
+        handled = true;
+        return pinBounds.Contains(new Point(x, y)) ? HtClient : HtTransparent;
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e)
@@ -241,6 +277,7 @@ public partial class MainWindow : Window
         SaveWindowState();
         _timer.Stop();
         _reader.Dispose();
+        _windowSource?.RemoveHook(WindowMessageHook);
         base.OnClosed(e);
     }
 
@@ -295,7 +332,9 @@ public partial class MainWindow : Window
         var panel = new StackPanel { Margin = new Thickness(16), Width = 340 };
         var border = new Border { Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(23, 23, 23)), BorderBrush = System.Windows.Media.Brushes.DimGray, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = panel };
         dialog.Content = border;
-        panel.Children.Add(new TextBlock { Text = "Display settings", Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold, FontSize = 15, Margin = new Thickness(0, 0, 0, 12) });
+        var dialogTitle = new TextBlock { Text = "Display settings", Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold, FontSize = 15, Margin = new Thickness(0, 0, 0, 12), Cursor = Cursors.SizeAll };
+        dialogTitle.MouseLeftButtonDown += (_, args) => { if (args.LeftButton == MouseButtonState.Pressed) dialog.DragMove(); };
+        panel.Children.Add(dialogTitle);
 
         var claudeDesktop = AddGroupSelector(panel, "Claude Desktop", _displaySettings.ClaudeDesktopGroup);
         var claudeCli = AddGroupSelector(panel, "Claude CLI", _displaySettings.ClaudeCliGroup);

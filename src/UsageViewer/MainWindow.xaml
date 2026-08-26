@@ -6,18 +6,22 @@
         AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="True"
         MouseLeftButtonDown="OnMouseLeftButtonDown">
-  <Border Background="#E8171717" BorderBrush="#666666" BorderThickness="1" CornerRadius="8" Padding="7,4">
+  <Border x:Name="OverlayBorder" Background="#E8171717" BorderBrush="#666666" BorderThickness="1" CornerRadius="8" Padding="7,4">
     <Grid>
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
-      <TextBlock x:Name="MainText" Grid.Row="0" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,76,0" />
-      <Button Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+      <TextBlock x:Name="MainText" Grid.Row="0" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,98,0" />
+      <Button x:Name="PinButton" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+              Width="20" Height="22" Margin="0,-3,76,0" Content="P"
+              Foreground="#BBBBBB" Background="Transparent" BorderThickness="0"
+              Cursor="Hand" ToolTip="釘選並讓其他區域點擊穿透" Click="OnPinClick" />
+      <Button x:Name="SettingsButton" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
               Width="54" Height="22" Margin="0,-3,22,0" Content="Settings"
               Foreground="#BBBBBB" Background="Transparent" BorderThickness="0"
               Cursor="Hand" ToolTip="設定顯示來源與群組" Click="OnSettingsClick" />
-      <Button Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+      <Button x:Name="CloseButton" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
               Width="22" Height="22" Margin="0,-3,-3,0"
               Content="&#x00D7;" FontFamily="Segoe UI" FontSize="16"
               Foreground="#BBBBBB" Background="Transparent" BorderThickness="0"
