@@ -276,13 +276,8 @@ $applyPinState = {
   $panel.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
-  $pinScreenLocation = $form.PointToScreen($pinButton.Location)
-  $unlockBounds = New-Object System.Drawing.Rectangle(
-    $pinScreenLocation.X - 2,
-    $pinScreenLocation.Y - 2,
-    $pinButton.Width + 4,
-    $pinButton.Height + 4
-  )
+  $unlockBounds = $pinButton.RectangleToScreen($pinButton.ClientRectangle)
+  $unlockBounds.Inflate(2, 2)
   [ResizableOverlayForm]::UnlockButtonBounds = $unlockBounds
 }
 $pinButton.Add_Click({
