@@ -24,6 +24,7 @@ using System.Windows.Forms;
 public class ResizableOverlayForm : Form
 {
   public static bool ClickThrough { get; set; }
+  public static Rectangle UnlockButtonBounds { get; set; }
   private const int WM_NCHITTEST = 0x84;
   private const int HTCLIENT = 1;
   private const int HTLEFT = 10;
@@ -40,8 +41,12 @@ public class ResizableOverlayForm : Form
   {
     if (ClickThrough && message.Msg == WM_NCHITTEST)
     {
-      message.Result = (IntPtr)(-1);
-      return;
+      Point screenPoint = Cursor.Position;
+      if (!UnlockButtonBounds.Contains(screenPoint))
+      {
+        message.Result = (IntPtr)(-1);
+        return;
+      }
     }
     base.WndProc(ref message);
 
@@ -240,7 +245,7 @@ $panel.Controls.Add($closeButton)
 $applyPinState = {
   # Keep P available so the overlay can always be unlocked with a second click.
   # Other controls and window manipulation are disabled while pinned.
-  [ResizableOverlayForm]::ClickThrough = $false
+  [ResizableOverlayForm]::ClickThrough = $script:IsPinned
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
   $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
@@ -253,6 +258,8 @@ $applyPinState = {
   $panel.BackColor = $normalPanelColor
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+  $pinScreenLocation = $form.PointToScreen($pinButton.Location)
+  [ResizableOverlayForm]::UnlockButtonBounds = New-Object System.Drawing.Rectangle($pinScreenLocation, $pinButton.Size)
 }
 $pinButton.Add_Click({
   $script:IsPinned = -not $script:IsPinned
