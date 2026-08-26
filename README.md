@@ -17,12 +17,27 @@ packaging/               MSIX manifest、圖示與封裝腳本
 
 從 `scripts` 資料夾執行：
 
-- `start-usage-viewer.cmd`：主要入口，啟動內建 reader 與 UsageViewer App
+- `start-usage-viewer.cmd`：獨立的 PowerShell overlay + readers 入口
+- `start-wpf-usage-viewer.cmd`：獨立啟動已 publish 的 WPF `UsageViewer.exe`
 - `start-overlay.cmd`：只啟動浮窗
 - `start-claude-desktop-reader.cmd` / `start-codex-reader.cmd`：只啟動 reader
 - `stop-readers.cmd`：停止 Claude 與 Codex reader
 
-`start-usage-viewer.cmd` 會優先啟動 `dist\\UsageViewer.exe`；尚未 publish 時才回退到 PowerShell overlay。已 publish 的 App 內建 Claude/Codex reader，不需要 Node.js。
+兩個入口互不依賴，但共用 `%USERPROFILE%\.usage-viewer` 內的 usage snapshot；overlay 入口不會啟動或檢查 WPF `.exe`。
+
+## 開發修改後的驗證流程
+
+修改 reader、overlay 或 WPF Viewer 後，需同步確認兩種執行路徑：Node/C# reader 都要寫入相同的 Desktop、CLI、SSH snapshot；PowerShell overlay 與 WPF Viewer 都要使用相同的 Combined/Separate 顯示規則。完成檢查後，重新執行 `scripts\restart-usage-viewer.cmd`，讓目前使用者直接看到最新結果。Overlay 的顯示選項由右上角 `Settings` 設定。
+
+也可以直接執行 `scripts\restart-usage-viewer.cmd`；它會重新啟動使用量 viewer，方便在修改完成後立即查看最新畫面。
+
+重啟腳本 `restart-usage-viewer.ps1` 會清理所有舊程序，並直接啟動最新的 overlay、readers 與 SSH synchronizer，不依賴 `start-usage-viewer.vbs` 的啟動鏈，避免多個舊 overlay 殘留造成看到舊畫面。
+
+PowerShell overlay 另有具名 mutex 單一執行個體鎖；即使啟動器被重複執行，也只允許一個 Usage Viewer 顯示器存在。
+
+Overlay 高度會依主內容與重置時間的實際行數自動調整，並保留字型下緣與視窗底部 padding，避免最後一行重置時間被裁切。
+
+SSH snapshot 採用單調時間保護：只有 `observed_at` 不早於目前 `codex-remote-latest.json` 的候選資料才能覆寫。SCP 同步期間若暫時只看到舊 session，Node 與 C# reader 都會保留上一份較新的有效 snapshot，避免 SSH 用量在不同歷史 session 間跳動。
 
 ## 直接下載
 
@@ -53,7 +68,17 @@ powershell -ExecutionPolicy Bypass -File packaging\\build-msix.ps1
 
 資料會寫入 `%USERPROFILE%\.usage-viewer`。若要讓 Claude Code 寫入 usage，將 `config/settings.json` 的設定合併到 `%USERPROFILE%\.claude\settings.json`，並確認路徑指向本專案的 `src\readers\statusline-usage-capture.js`。
 
-若 Codex 使用遠端 session，請將遠端產生的最新 usage snapshot 同步到 `%USERPROFILE%\.usage-viewer\codex-remote-latest.json`。Viewer 會比較 snapshot 的 `observed_at`，自動顯示本機或遠端較新的資料。檔案格式沿用 `codex-app-latest.json`，至少需要包含 `observed_at`（ISO 8601）、`percentages`、`resets_at` 三個欄位。
+Codex usage 會依來源分開寫入 `%USERPROFILE%\.usage-viewer`：`codex-desktop-latest.json`、`codex-cli-latest.json`、`codex-remote-latest.json`。三者都包含獨立的 `observed_at`、`percentages.five_hour_used`、`percentages.seven_day_used`、`resets_at.five_hour_epoch_seconds` 與 `resets_at.seven_day_epoch_seconds`，不會把 Desktop、CLI、SSH 的使用量混在一起。`codex-app-latest.json` 保留為相容輸出，代表最新的本機 Desktop/CLI 資料，不包含 SSH。
+
+目前兩種執行方式都會同步產生上述檔案：直接執行 `src\readers\codex-usage-read.js` 的 Node reader，以及 Usage Viewer 內建的 C#/WPF reader。Desktop 與 CLI 視為同一個本機 Codex；`Combined` 顯示合併後的本機 Codex，`Separate` 則顯示本機與遠端兩行，遠端來源只在該行最末尾標示 `(SSH)`。每個 Codex 行固定顯示 `7d` 與 `5h`，資料缺失時顯示 `-`。
+
+`scripts\start-usage-viewer.cmd` 是獨立的 PowerShell overlay 入口，不依賴也不會啟動 `dist\UsageViewer.exe`。WPF 桌面程式是另一條獨立路徑，使用 `scripts\start-wpf-usage-viewer.cmd` 啟動；兩者共用 snapshot，但不互相依賴。
+
+Overlay 右上角的 `Settings` 會開啟自由來源群組設定頁。Claude Desktop/CLI 與 Codex Desktop/CLI/remote（SSH）各自可指定 `Group 1`、`Group 2`、`Group 3` 或 `Hidden`；同一產品中指定到相同 Group 的來源會合併，不同 Group 各自顯示。這可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存到 `%USERPROFILE%\.usage-viewer\display-settings.json`，重啟後自動套用。
+
+設定頁採用與主 overlay 一致的深色無框、扁平按鈕與右上角關閉鍵風格。
+
+Windows 的 Settings 另有 `Claude user environment`：`Open Default` 透過目前安裝的 Start Menu Claude 啟動預設帳號；`Open Work` 會動態尋找 Store/MSIX 或傳統安裝的 Claude.exe，並以 `%LOCALAPPDATA%\Claude-Work` 作為獨立 `--user-data-dir`。兩個環境各自保存登入 Cookie、session 與設定，不需反覆登出登入。
 
 可使用 `scripts\sync-codex-remote.ps1` 自動同步。腳本目前已設定連線到 `jerry@192.168.2.57`，只會透過 SCP 複製遠端 `~/.codex/sessions`，遠端不需要安裝 Python、Node.js 或本專案。
 
