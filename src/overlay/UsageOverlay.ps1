@@ -241,6 +241,7 @@ $applyPinState = {
   # Keep P available so the overlay can always be unlocked with a second click.
   # Other controls and window manipulation are disabled while pinned.
   [ResizableOverlayForm]::ClickThrough = $script:IsPinned
+  $form.TopMost = $true
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
   $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
@@ -418,6 +419,9 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
 $timer.Add_Tick({
   try {
+    if ($script:IsPinned -and -not $form.TopMost) {
+      $form.TopMost = $true
+    }
     $pinHotkeyDown = (([OverlayWindowInterop]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) -and
       (([OverlayWindowInterop]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) -and
       (([OverlayWindowInterop]::GetAsyncKeyState(0x50) -band 0x8000) -ne 0)
