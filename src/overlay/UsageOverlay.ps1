@@ -664,13 +664,13 @@ function Measure-MultilineTextSize {
   $maxWidth = 0
 
   foreach ($line in $lines) {
-    $maxWidth = [Math]::Max(
+    [void]($maxWidth = [Math]::Max(
       $maxWidth,
       (Measure-TextWidth -Text $line -Font $Font)
-    )
+    ))
   }
 
-  $lineHeight = [System.Windows.Forms.TextRenderer]::MeasureText("Ag", $Font).Height
+  $lineHeight = [int][System.Windows.Forms.TextRenderer]::MeasureText("Ag", $Font).Height
   return [System.Drawing.Size]::new([int]$maxWidth, [int]($lineHeight * $lines.Count))
 }
 
