@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $createdNew = $false
-$overlayMutex = New-Object System.Threading.Mutex($true, "UsageViewer.PowerShellOverlay", [ref]$createdNew)
+$overlayMutex = New-Object System.Threading.Mutex($true, "UsageViewer.PowerShellOverlay.v2", [ref]$createdNew)
 if (-not $createdNew) {
   $overlayMutex.Dispose()
   exit 0
@@ -117,6 +117,7 @@ $script:ClaudeCliGroup = "Group 1"
 $script:CodexDesktopGroup = "Group 1"
 $script:CodexCliGroup = "Group 1"
 $script:CodexSshGroup = "Group 2"
+$script:ClaudeUserEnvironment = "default"
 if (Test-Path -LiteralPath $displaySettingsFile) {
   try {
     $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
@@ -132,6 +133,7 @@ if (Test-Path -LiteralPath $displaySettingsFile) {
     if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = [string]$savedSettings.codex_desktop_group }
     if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = [string]$savedSettings.codex_cli_group }
     if ($savedSettings.codex_ssh_group) { $script:CodexSshGroup = [string]$savedSettings.codex_ssh_group }
+    if ($savedSettings.claude_user_environment -in @("default", "work")) { $script:ClaudeUserEnvironment = [string]$savedSettings.claude_user_environment }
   } catch { }
 }
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
@@ -1032,7 +1034,9 @@ function Show-DisplaySettings {
   $dialog.Controls.Add($workAccount)
 
   $accountStatus = New-Object System.Windows.Forms.Label
-  $accountStatus.Text = "Default and Work keep separate login sessions."
+  $currentEnvironmentLabel = if ($script:ClaudeUserEnvironment -eq "work") { "Work account" } else { "Default account" }
+  $currentEnvironmentFolder = if ($script:ClaudeUserEnvironment -eq "work") { "Claude-Work" } else { "Claude-Default" }
+  $accountStatus.Text = "Current: $currentEnvironmentLabel  |  Folder: $currentEnvironmentFolder"
   $accountStatus.Location = New-Object System.Drawing.Point(20, 309)
   $accountStatus.Size = New-Object System.Drawing.Size(305, 20)
   $accountStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
@@ -1076,6 +1080,7 @@ function Show-DisplaySettings {
       codex_desktop_group = $script:CodexDesktopGroup
       codex_cli_group = $script:CodexCliGroup
       codex_ssh_group = $script:CodexSshGroup
+      claude_user_environment = $script:ClaudeUserEnvironment
     } |
       ConvertTo-Json | Set-Content -LiteralPath $displaySettingsFile -Encoding UTF8
     Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
@@ -1110,11 +1115,13 @@ function Start-ClaudeUserEnvironment {
   )
 
   try {
+    $script:ClaudeUserEnvironment = $EnvironmentName
+    $environmentLabel = if ($EnvironmentName -eq "default") { "Default" } else { "Work" }
     if ($EnvironmentName -eq "default") {
       $app = Get-StartApps | Where-Object { $_.Name -eq "Claude" } | Select-Object -First 1
       if ($null -eq $app) { throw "Claude Start Menu app was not found." }
       Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\$($app.AppID)"
-      $StatusLabel.Text = "Opened Claude Default."
+      $StatusLabel.Text = "Current: $environmentLabel — opened Claude Default."
       return
     }
 
@@ -1123,7 +1130,7 @@ function Start-ClaudeUserEnvironment {
     $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Work"
     New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
     Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profileDirectory`""
-    $StatusLabel.Text = "Opened Claude Work. Sign in once to save this session."
+    $StatusLabel.Text = "Current: $environmentLabel — opened Claude Work. Sign in once to save this session."
   } catch {
     $StatusLabel.Text = "Unable to open Claude: $($_.Exception.Message)"
   }
