@@ -24,6 +24,7 @@ using System.Windows.Forms;
 public class ResizableOverlayForm : Form
 {
   public static bool ClickThrough { get; set; }
+  public static Rectangle UnlockButtonBounds { get; set; }
   private const int WM_NCHITTEST = 0x84;
   private const int HTCLIENT = 1;
   private const int HTLEFT = 10;
@@ -40,8 +41,11 @@ public class ResizableOverlayForm : Form
   {
     if (ClickThrough && message.Msg == WM_NCHITTEST)
     {
-      message.Result = (IntPtr)(-1);
-      return;
+      if (!UnlockButtonBounds.Contains(Cursor.Position))
+      {
+        message.Result = (IntPtr)(-1);
+        return;
+      }
     }
     base.WndProc(ref message);
 
@@ -272,6 +276,14 @@ $applyPinState = {
   $panel.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+  $pinScreenLocation = $form.PointToScreen($pinButton.Location)
+  $unlockBounds = New-Object System.Drawing.Rectangle(
+    $pinScreenLocation.X - 2,
+    $pinScreenLocation.Y - 2,
+    $pinButton.Width + 4,
+    $pinButton.Height + 4
+  )
+  [ResizableOverlayForm]::UnlockButtonBounds = $unlockBounds
 }
 $pinButton.Add_Click({
   $script:IsPinned = -not $script:IsPinned
