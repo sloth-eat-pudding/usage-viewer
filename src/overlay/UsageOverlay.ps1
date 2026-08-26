@@ -79,6 +79,17 @@ public static class OverlayWindowInterop
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern bool ReleaseCapture();
 
+  [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+  public static extern bool SetWindowPos(
+    IntPtr hWnd,
+    IntPtr hWndInsertAfter,
+    int x,
+    int y,
+    int cx,
+    int cy,
+    uint flags
+  );
+
   [System.Runtime.InteropServices.DllImport("user32.dll")]
   public static extern IntPtr SendMessage(
     IntPtr hWnd,
@@ -88,6 +99,11 @@ public static class OverlayWindowInterop
   );
 }
 "@
+
+$HWND_TOPMOST = [IntPtr](-1)
+$SWP_NOSIZE = 0x0001
+$SWP_NOMOVE = 0x0002
+$SWP_NOACTIVATE = 0x0010
 
 $usageHome = $env:USAGE_VIEWER_HOME
 if ([string]::IsNullOrWhiteSpace($usageHome)) {
@@ -242,6 +258,9 @@ $applyPinState = {
   # Other controls and window manipulation are disabled while pinned.
   [ResizableOverlayForm]::ClickThrough = $script:IsPinned
   $form.TopMost = $true
+  if ($script:IsPinned) {
+    [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE -bor $SWP_NOACTIVATE) | Out-Null
+  }
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
   $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
@@ -421,6 +440,9 @@ $timer.Add_Tick({
   try {
     if ($script:IsPinned -and -not $form.TopMost) {
       $form.TopMost = $true
+    }
+    if ($script:IsPinned) {
+      [OverlayWindowInterop]::SetWindowPos($form.Handle, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE -bor $SWP_NOACTIVATE) | Out-Null
     }
     $pinHotkeyDown = (([OverlayWindowInterop]::GetAsyncKeyState(0x11) -band 0x8000) -ne 0) -and
       (([OverlayWindowInterop]::GetAsyncKeyState(0x12) -band 0x8000) -ne 0) -and
