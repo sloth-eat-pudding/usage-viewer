@@ -12,11 +12,11 @@
         <RowDefinition Height="Auto" />
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
-      <TextBlock x:Name="MainText" Grid.Row="0" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,70,0" />
-      <Button x:Name="ModeButton" Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
-              Width="42" Height="22" Margin="0,-3,22,0" Content="Local"
+      <TextBlock x:Name="MainText" Grid.Row="0" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,76,0" />
+      <Button Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
+              Width="54" Height="22" Margin="0,-3,22,0" Content="Settings"
               Foreground="#BBBBBB" Background="Transparent" BorderThickness="0"
-              Cursor="Hand" ToolTip="切換 Codex 顯示範圍" Click="OnModeClick" />
+              Cursor="Hand" ToolTip="設定顯示來源與群組" Click="OnSettingsClick" />
       <Button Grid.Row="0" HorizontalAlignment="Right" VerticalAlignment="Top"
               Width="22" Height="22" Margin="0,-3,-3,0"
               Content="&#x00D7;" FontFamily="Segoe UI" FontSize="16"

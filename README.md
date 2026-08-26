@@ -74,7 +74,7 @@ Codex usage 會依來源分開寫入 `%USERPROFILE%\.usage-viewer`：`codex-desk
 
 `scripts\start-usage-viewer.cmd` 是獨立的 PowerShell overlay 入口，不依賴也不會啟動 `dist\UsageViewer.exe`。WPF 桌面程式是另一條獨立路徑，使用 `scripts\start-wpf-usage-viewer.cmd` 啟動；兩者共用 snapshot，但不互相依賴。
 
-Overlay 右上角的 `Settings` 會開啟自由來源群組設定頁。Claude Desktop/CLI 與 Codex Desktop/CLI/remote（SSH）各自可指定 `Group 1`、`Group 2`、`Group 3` 或 `Hidden`；同一產品中指定到相同 Group 的來源會合併，不同 Group 各自顯示。這可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存到 `%USERPROFILE%\.usage-viewer\display-settings.json`，重啟後自動套用。
+PowerShell overlay 與 WPF `UsageViewer.exe` 的右上角 `Settings` 都會開啟自由來源群組設定頁。Claude Desktop/CLI 與 Codex Desktop/CLI/remote（SSH）各自可指定 `Group 1`、`Group 2`、`Group 3` 或 `Hidden`；同一產品中指定到相同 Group 的來源會合併，不同 Group 各自顯示。這可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存到 `%USERPROFILE%\.usage-viewer\display-settings.json`，兩種執行方式共用並自動套用。WPF Settings 選擇自訂 Claude history 後，也會同步更新內建 reader 使用的 `claude-custom-source.json`。
 
 設定頁採用與主 overlay 一致的深色無框、扁平按鈕與右上角關閉鍵風格。
 
