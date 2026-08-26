@@ -152,7 +152,7 @@ if (Test-Path -LiteralPath $displaySettingsFile) {
     if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = [string]$savedSettings.codex_desktop_group }
     if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = [string]$savedSettings.codex_cli_group }
     if ($savedSettings.codex_ssh_group) { $script:CodexSshGroup = [string]$savedSettings.codex_ssh_group }
-    if ($savedSettings.claude_user_environment -in @("default", "work")) { $script:ClaudeUserEnvironment = [string]$savedSettings.claude_user_environment }
+    if ($savedSettings.claude_user_environment -in @("default", "self")) { $script:ClaudeUserEnvironment = [string]$savedSettings.claude_user_environment }
   } catch { }
 }
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
@@ -266,13 +266,13 @@ $applyPinState = {
   }
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
-  $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
+  $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
   $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
   $costToggle.Enabled = -not $script:IsPinned
-  # U mode is a text-only, click-through overlay. The content remains visible
-  # while the panel and button backgrounds use the keyed transparent color.
+  # U mode keeps the background click-through while the unlock button remains
+  # visibly rendered and retains its complete hit area.
   $panel.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
@@ -1065,16 +1065,16 @@ function Show-DisplaySettings {
   $defaultAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "default" -StatusLabel $accountStatus })
   $dialog.Controls.Add($defaultAccount)
 
-  $workAccount = New-Object System.Windows.Forms.Button
-  $workAccount.Text = "Open Work"
-  $workAccount.Location = New-Object System.Drawing.Point(175, 275)
-  $workAccount.Size = New-Object System.Drawing.Size(145, 28)
-  $workAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "work" -StatusLabel $accountStatus })
-  $dialog.Controls.Add($workAccount)
+  $selfAccount = New-Object System.Windows.Forms.Button
+  $selfAccount.Text = "Open Self"
+  $selfAccount.Location = New-Object System.Drawing.Point(175, 275)
+  $selfAccount.Size = New-Object System.Drawing.Size(145, 28)
+  $selfAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "self" -StatusLabel $accountStatus })
+  $dialog.Controls.Add($selfAccount)
 
   $accountStatus = New-Object System.Windows.Forms.Label
-  $currentEnvironmentLabel = if ($script:ClaudeUserEnvironment -eq "work") { "Work account" } else { "Default account" }
-  $currentEnvironmentFolder = if ($script:ClaudeUserEnvironment -eq "work") { "Claude-Work" } else { "Claude-Default" }
+  $currentEnvironmentLabel = if ($script:ClaudeUserEnvironment -eq "self") { "Self account" } else { "Default account" }
+  $currentEnvironmentFolder = if ($script:ClaudeUserEnvironment -eq "self") { "Claude-Self" } else { "Claude" }
   $accountStatus.Text = "Current: $currentEnvironmentLabel  |  Folder: $currentEnvironmentFolder"
   $accountStatus.Location = New-Object System.Drawing.Point(20, 309)
   $accountStatus.Size = New-Object System.Drawing.Size(305, 20)
@@ -1099,7 +1099,7 @@ function Show-DisplaySettings {
   $save.FlatAppearance.BorderSize = 0
   $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
   $save.ForeColor = [System.Drawing.Color]::White
-  foreach ($button in @($defaultAccount, $workAccount)) {
+  foreach ($button in @($defaultAccount, $selfAccount)) {
     $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $button.FlatAppearance.BorderSize = 0
     $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
@@ -1149,13 +1149,13 @@ function Get-ClaudeDesktopExecutable {
 
 function Start-ClaudeUserEnvironment {
   param(
-    [ValidateSet("default", "work")][string]$EnvironmentName,
+    [ValidateSet("default", "self")][string]$EnvironmentName,
     [System.Windows.Forms.Label]$StatusLabel
   )
 
   try {
     $script:ClaudeUserEnvironment = $EnvironmentName
-    $environmentLabel = if ($EnvironmentName -eq "default") { "Default" } else { "Work" }
+    $environmentLabel = if ($EnvironmentName -eq "default") { "Default" } else { "Self" }
     if ($EnvironmentName -eq "default") {
       $app = Get-StartApps | Where-Object { $_.Name -eq "Claude" } | Select-Object -First 1
       if ($null -eq $app) { throw "Claude Start Menu app was not found." }
@@ -1166,10 +1166,10 @@ function Start-ClaudeUserEnvironment {
 
     $executable = Get-ClaudeDesktopExecutable
     if ([string]::IsNullOrWhiteSpace($executable)) { throw "Claude.exe was not found." }
-    $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Work"
+    $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Self"
     New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
     Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profileDirectory`""
-    $StatusLabel.Text = "Current: $environmentLabel — opened Claude Work. Sign in once to save this session."
+    $StatusLabel.Text = "Current: $environmentLabel — opened Claude Self. Sign in once to save this session."
   } catch {
     $StatusLabel.Text = "Unable to open Claude: $($_.Exception.Message)"
   }
