@@ -632,12 +632,16 @@ function Resize-OverlayToContent {
   $mainVerticalPadding = 2
   $detailVerticalPadding = 5
 
-  $contentWidth = [Math]::Max($mainSize.Width + $buttonArea, $detailSize.Width)
+  $mainTextWidth = [int]$mainSize.Width
+  $mainTextHeight = [int]$mainSize.Height
+  $detailTextWidth = [int]$detailSize.Width
+  $detailTextHeight = [int]$detailSize.Height
+  $contentWidth = [int][Math]::Max($mainTextWidth + [int]$buttonArea, $detailTextWidth)
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
-  $desiredWidth = [Math]::Min(900, [Math]::Max($minimumWidth, $left + $contentWidth + $right))
-  $mainHeight = $mainSize.Height + $mainVerticalPadding
-  $detailHeight = $detailSize.Height + $detailVerticalPadding
-  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, $top + $mainHeight + $gap + $detailHeight + $bottom)
+  $desiredWidth = [int][Math]::Min(900, [Math]::Max([int]$minimumWidth, $left + $contentWidth + $right))
+  $mainHeight = $mainTextHeight + $mainVerticalPadding
+  $detailHeight = $detailTextHeight + $detailVerticalPadding
+  $desiredHeight = [int][Math]::Max([int]$Form.MinimumSize.Height, $top + $mainHeight + $gap + $detailHeight + $bottom)
 
   $Form.ClientSize = [System.Drawing.Size]::new([int]$desiredWidth, [int]$desiredHeight)
   $Main.Location = [System.Drawing.Point]::new($left, $top)
