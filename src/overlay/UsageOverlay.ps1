@@ -1,12 +1,20 @@
 param(
   [string]$UsageFile = "",
-  [int]$RefreshMs = 1000
+  [int]$RefreshMs = 1000,
+  [ValidateSet("combined", "separate")][string]$DisplayMode = "combined"
 )
 
 $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+$createdNew = $false
+$overlayMutex = New-Object System.Threading.Mutex($true, "UsageViewer.PowerShellOverlay", [ref]$createdNew)
+if (-not $createdNew) {
+  $overlayMutex.Dispose()
+  exit 0
+}
 
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing -TypeDefinition @"
 using System;
@@ -82,9 +90,44 @@ $combinedMode = [string]::IsNullOrWhiteSpace($UsageFile)
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $windowIconPath = Join-Path $scriptDirectory "..\..\assets\usage-viewer.ico"
 $claudeUsageFile = Join-Path $usageHome "claude-app-latest.json"
+$claudeDesktopUsageFile = Join-Path $usageHome "claude-desktop-latest.json"
+$claudeCliUsageFile = Join-Path $usageHome "claude-statusline-latest.json"
 $codexUsageFile = Join-Path $usageHome "codex-app-latest.json"
+$codexDesktopUsageFile = Join-Path $usageHome "codex-desktop-latest.json"
+$codexCliUsageFile = Join-Path $usageHome "codex-cli-latest.json"
+$codexRemoteUsageFile = Join-Path $usageHome "codex-remote-latest.json"
+$displaySettingsFile = Join-Path $usageHome "display-settings.json"
+$script:ShowClaudeDesktop = $true
+$script:ShowClaudeCli = $true
+$script:MergeClaude = $true
+$script:ShowCodexDesktop = $true
+$script:ShowCodexCli = $true
+$script:ShowSsh = $true
+$script:MergeCodex = $false
+$script:ClaudeDesktopGroup = "Group 1"
+$script:ClaudeCliGroup = "Group 1"
+$script:CodexDesktopGroup = "Group 1"
+$script:CodexCliGroup = "Group 1"
+$script:CodexSshGroup = "Group 2"
+if (Test-Path -LiteralPath $displaySettingsFile) {
+  try {
+    $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
+    if ($null -ne $savedSettings.show_claude_desktop) { $script:ShowClaudeDesktop = [bool]$savedSettings.show_claude_desktop }
+    if ($null -ne $savedSettings.show_claude_cli) { $script:ShowClaudeCli = [bool]$savedSettings.show_claude_cli }
+    if ($null -ne $savedSettings.merge_claude) { $script:MergeClaude = [bool]$savedSettings.merge_claude }
+    if ($null -ne $savedSettings.show_codex_desktop) { $script:ShowCodexDesktop = [bool]$savedSettings.show_codex_desktop }
+    if ($null -ne $savedSettings.show_codex_cli) { $script:ShowCodexCli = [bool]$savedSettings.show_codex_cli }
+    if ($null -ne $savedSettings.show_ssh) { $script:ShowSsh = [bool]$savedSettings.show_ssh }
+    if ($null -ne $savedSettings.merge_codex) { $script:MergeCodex = [bool]$savedSettings.merge_codex }
+    if ($savedSettings.claude_desktop_group) { $script:ClaudeDesktopGroup = [string]$savedSettings.claude_desktop_group }
+    if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = [string]$savedSettings.claude_cli_group }
+    if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = [string]$savedSettings.codex_desktop_group }
+    if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = [string]$savedSettings.codex_cli_group }
+    if ($savedSettings.codex_ssh_group) { $script:CodexSshGroup = [string]$savedSettings.codex_ssh_group }
+  } catch { }
+}
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
-$defaultWindowSize = New-Object System.Drawing.Size(260, 68)
+$defaultWindowSize = New-Object System.Drawing.Size(340, 96)
 
 [OverlayWindowInterop]::SetCurrentProcessExplicitAppUserModelID("SlothEatPudding.UsageViewer") | Out-Null
 
@@ -126,7 +169,7 @@ $resetButton.FlatAppearance.BorderSize = 0
 $resetButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $resetButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $resetButton.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
-$resetButton.Location = New-Object System.Drawing.Point(216, 2)
+$resetButton.Location = New-Object System.Drawing.Point(286, 2)
 $resetButton.Size = New-Object System.Drawing.Size(20, 20)
 $resetButton.Text = "R"
 $resetButton.TabStop = $false
@@ -139,6 +182,20 @@ $resetButton.Add_Click({
 })
 $panel.Controls.Add($resetButton)
 
+$settingsButton = New-Object System.Windows.Forms.Button
+$settingsButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
+$settingsButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+$settingsButton.FlatAppearance.BorderSize = 0
+$settingsButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
+$settingsButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
+$settingsButton.Font = New-Object System.Drawing.Font("Segoe UI", 7, [System.Drawing.FontStyle]::Bold)
+$settingsButton.Location = New-Object System.Drawing.Point(234, 2)
+$settingsButton.Size = New-Object System.Drawing.Size(50, 20)
+$settingsButton.Text = "Settings"
+$settingsButton.TabStop = $false
+$settingsButton.Add_Click({ Show-DisplaySettings })
+$panel.Controls.Add($settingsButton)
+
 $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $closeButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
@@ -146,7 +203,7 @@ $closeButton.FlatAppearance.BorderSize = 0
 $closeButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $closeButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $closeButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$closeButton.Location = New-Object System.Drawing.Point(238, 2)
+$closeButton.Location = New-Object System.Drawing.Point(308, 2)
 $closeButton.Size = New-Object System.Drawing.Size(20, 20)
 $closeButton.Text = "X"
 $closeButton.TabStop = $false
@@ -393,10 +450,18 @@ function Update-CombinedUsageView {
     [System.Windows.Forms.Label]$CostToggle
   )
 
-  $claude = Read-LatestClaudeUsage $ClaudeUsageFile
-  $codex = Read-UsageJson $CodexUsageFile
+  $claudeSources = @()
+  if ($script:ClaudeDesktopGroup -ne "Hidden") { $claudeSources += @{ Label = "D"; Group = $script:ClaudeDesktopGroup; Data = (Read-UsageJson $claudeDesktopUsageFile) } }
+  if ($script:ClaudeCliGroup -ne "Hidden") { $claudeSources += @{ Label = "C"; Group = $script:ClaudeCliGroup; Data = (Read-UsageJson $claudeCliUsageFile) } }
+  $claudeSources = @($claudeSources | Where-Object { $null -ne $_.Data })
 
-  if ($null -eq $claude -and $null -eq $codex) {
+  $codexSources = @()
+  if ($script:CodexDesktopGroup -ne "Hidden") { $codexSources += @{ Label = "D"; Group = $script:CodexDesktopGroup; Data = (Read-UsageJson $codexDesktopUsageFile) } }
+  if ($script:CodexCliGroup -ne "Hidden") { $codexSources += @{ Label = "C"; Group = $script:CodexCliGroup; Data = (Read-UsageJson $codexCliUsageFile) } }
+  if ($script:CodexSshGroup -ne "Hidden") { $codexSources += @{ Label = "SSH"; Group = $script:CodexSshGroup; Data = (Read-UsageJson $codexRemoteUsageFile) } }
+  $codexSources = @($codexSources | Where-Object { $null -ne $_.Data })
+
+  if ($claudeSources.Count -eq 0 -and $codexSources.Count -eq 0) {
     $Title.Text = ""
     $Main.Text = "Waiting for Claude / Codex usage..."
     $Detail.Text = ""
@@ -406,33 +471,42 @@ function Update-CombinedUsageView {
 
   $Title.Text = ""
 
-  $claudeLine = if ($null -eq $claude) {
-    "Claude ?% ?%"
-  } else {
-    Format-ClaudeUsageLine $claude
+  $mainLines = @()
+  $detailLines = @()
+
+  $claudeGroupNames = @($claudeSources | ForEach-Object { [string]$_.Group } | Sort-Object -Unique)
+  foreach ($groupName in $claudeGroupNames) {
+    $groupItems = @($claudeSources | Where-Object { [string]$_.Group -eq $groupName })
+    $item = $groupItems | Sort-Object { Get-UsageTimestamp $_.Data } -Descending | Select-Object -First 1
+    $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
+    $suffix = "  ($labels)"
+    $mainLines += "$(Format-ClaudeUsageLine $item.Data)$suffix"
+    $detailLines += "Claude  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
-  $codexLine = if ($null -eq $codex) {
-    "Codex   usage unavailable"
-  } else {
-    Format-CodexUsageLine $codex
+  $codexGroupNames = @($codexSources | ForEach-Object { [string]$_.Group } | Sort-Object -Unique)
+  foreach ($groupName in $codexGroupNames) {
+    $groupItems = @($codexSources | Where-Object { [string]$_.Group -eq $groupName })
+    $item = $groupItems | Sort-Object { Get-UsageTimestamp $_.Data } -Descending | Select-Object -First 1
+    $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
+    $suffix = "  ($labels)"
+    $mainLines += "$(Format-CodexUsageLine $item.Data)$suffix"
+    $detailLines += "Codex   $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
-  $Main.Text = "$claudeLine`r`n$codexLine"
-
-  $codexTimeLine = if ($null -eq $codex) {
-    "Codex   waiting"
-  } else {
-    "Codex   $(Format-ResetSummary $codex) | $(Format-Age (Get-UsageTimestamp $codex))  $(Get-CodexSourceSuffix $codex)"
-  }
-
-  $claudeTimeLine = if ($null -eq $claude) {
-    "Claude  waiting"
-  } else {
-    "Claude  $(Format-ResetSummary $claude) | $(Format-Age (Get-UsageTimestamp $claude))  $(Get-ClaudeSourceSuffix $claude)"
-  }
-
-  $Detail.Text = "$claudeTimeLine`r`n$codexTimeLine"
+  $Main.Text = $mainLines -join "`r`n"
+  $Detail.Text = $detailLines -join "`r`n"
+  try {
+    @{
+      generated_at = [DateTimeOffset]::Now.ToString("O")
+      main_lines = @($mainLines)
+      detail_lines = @($detailLines)
+      claude_groups = @($claudeSources | ForEach-Object { @{ label = $_.Label; group = $_.Group } })
+      codex_groups = @($codexSources | ForEach-Object { @{ label = $_.Label; group = $_.Group } })
+      main_text = $Main.Text
+      detail_text = $Detail.Text
+    } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $usageHome "display-render-state.json") -Encoding UTF8
+  } catch { }
   $CostToggle.Text = ""
 }
 
@@ -450,18 +524,22 @@ function Resize-OverlayToContent {
   $top = 4
   $gap = 1
   $right = 6
-  $bottom = 4
-  $buttonArea = 46
+  $bottom = 7
+  $buttonArea = 78
+  $mainVerticalPadding = 2
+  $detailVerticalPadding = 5
 
   $contentWidth = [Math]::Max($mainSize.Width + $buttonArea, $detailSize.Width)
-  $desiredWidth = [Math]::Min(760, [Math]::Max($Form.MinimumSize.Width, $left + $contentWidth + $right))
-  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, $top + $mainSize.Height + $gap + $detailSize.Height + $bottom)
+  $desiredWidth = [Math]::Min(900, [Math]::Max(340, $left + $contentWidth + $right))
+  $mainHeight = $mainSize.Height + $mainVerticalPadding
+  $detailHeight = $detailSize.Height + $detailVerticalPadding
+  $desiredHeight = [Math]::Max($Form.MinimumSize.Height, $top + $mainHeight + $gap + $detailHeight + $bottom)
 
   $Form.ClientSize = [System.Drawing.Size]::new([int]$desiredWidth, [int]$desiredHeight)
   $Main.Location = [System.Drawing.Point]::new($left, $top)
-  $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $mainSize.Height)
-  $Detail.Location = [System.Drawing.Point]::new($left, $top + $mainSize.Height + $gap)
-  $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $detailSize.Height)
+  $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $mainHeight)
+  $Detail.Location = [System.Drawing.Point]::new($left, $top + $mainHeight + $gap)
+  $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $detailHeight)
 }
 
 function Measure-MultilineTextSize {
@@ -634,10 +712,9 @@ function Format-CodexUsageLine {
   $parts = @()
   $week = Format-UsagePercent $Codex.percentages.seven_day_used
   $fiveHour = Format-UsagePercent $Codex.percentages.five_hour_used
-  if ($week -ne "?") { $parts += "7d $week" }
-  if ($fiveHour -ne "?") { $parts += "5h $fiveHour" }
-  if ($parts.Count -eq 0) { return "Codex   usage unavailable" }
-  return "Codex   $($parts -join '  |  ')"
+  if ($week -eq "?") { $week = "-" }
+  if ($fiveHour -eq "?") { $fiveHour = "-" }
+  return "Codex   7d $week  |  5h $fiveHour"
 }
 
 function Get-CodexSourceSuffix {
@@ -750,6 +827,162 @@ function Format-ResetSummary {
   return "?"
 }
 
+function Show-DisplaySettings {
+  $dialog = New-Object System.Windows.Forms.Form
+  $dialog.Text = "Usage Viewer Settings"
+  $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+  $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+  $dialog.MaximizeBox = $false
+  $dialog.MinimizeBox = $false
+  $dialog.ShowInTaskbar = $false
+  $dialog.TopMost = $true
+  $dialog.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
+  $dialog.ForeColor = [System.Drawing.Color]::White
+  $dialog.Opacity = 0.96
+  $dialog.ClientSize = New-Object System.Drawing.Size(350, 275)
+
+  $dialogTitle = New-Object System.Windows.Forms.Label
+  $dialogTitle.Text = "Display settings"
+  $dialogTitle.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+  $dialogTitle.ForeColor = [System.Drawing.Color]::White
+  $dialogTitle.Location = New-Object System.Drawing.Point(12, 8)
+  $dialogTitle.AutoSize = $true
+  $dialog.Controls.Add($dialogTitle)
+  $dragSettings = {
+    [OverlayWindowInterop]::ReleaseCapture() | Out-Null
+    [OverlayWindowInterop]::SendMessage($dialog.Handle, [OverlayWindowInterop]::WM_NCLBUTTONDOWN, 2, 0) | Out-Null
+  }
+  $dialogTitle.Add_MouseDown($dragSettings)
+
+  $dialogClose = New-Object System.Windows.Forms.Button
+  $dialogClose.Text = "X"
+  $dialogClose.Location = New-Object System.Drawing.Point(322, 4)
+  $dialogClose.Size = New-Object System.Drawing.Size(22, 22)
+  $dialogClose.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $dialogClose.FlatAppearance.BorderSize = 0
+  $dialogClose.BackColor = $dialog.BackColor
+  $dialogClose.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
+  $dialogClose.Add_Click({ $dialog.Close() })
+  $dialog.Controls.Add($dialogClose)
+
+  $claudeLabel = New-Object System.Windows.Forms.Label
+  $claudeLabel.Text = "Claude sources"
+  $claudeLabel.Location = New-Object System.Drawing.Point(15, 42)
+  $claudeLabel.AutoSize = $true
+  $dialog.Controls.Add($claudeLabel)
+
+  $claudeDesktopLabel = New-Object System.Windows.Forms.Label
+  $claudeDesktopLabel.Text = "Desktop"
+  $claudeDesktopLabel.Location = New-Object System.Drawing.Point(20, 70)
+  $claudeDesktopLabel.AutoSize = $true
+  $dialog.Controls.Add($claudeDesktopLabel)
+  $claudeDesktop = New-Object System.Windows.Forms.ComboBox
+  $claudeDesktop.Location = New-Object System.Drawing.Point(20, 67)
+  $claudeDesktop.Location = New-Object System.Drawing.Point(170, 64)
+  $claudeDesktop.Size = New-Object System.Drawing.Size(150, 24)
+  $claudeDesktop.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$claudeDesktop.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $claudeDesktop.SelectedIndex = [Math]::Max(0, $claudeDesktop.Items.IndexOf($script:ClaudeDesktopGroup))
+  $dialog.Controls.Add($claudeDesktop)
+
+  $claudeCliLabel = New-Object System.Windows.Forms.Label
+  $claudeCliLabel.Text = "CLI"
+  $claudeCliLabel.Location = New-Object System.Drawing.Point(20, 98)
+  $claudeCliLabel.AutoSize = $true
+  $dialog.Controls.Add($claudeCliLabel)
+  $claudeCli = New-Object System.Windows.Forms.ComboBox
+  $claudeCli.Location = New-Object System.Drawing.Point(170, 92)
+  $claudeCli.Size = New-Object System.Drawing.Size(150, 24)
+  $claudeCli.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$claudeCli.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $claudeCli.SelectedIndex = [Math]::Max(0, $claudeCli.Items.IndexOf($script:ClaudeCliGroup))
+  $dialog.Controls.Add($claudeCli)
+
+  $codexLabel = New-Object System.Windows.Forms.Label
+  $codexLabel.Text = "Codex sources"
+  $codexLabel.Location = New-Object System.Drawing.Point(15, 132)
+  $codexLabel.AutoSize = $true
+  $dialog.Controls.Add($codexLabel)
+
+  $codexDesktopLabel = New-Object System.Windows.Forms.Label
+  $codexDesktopLabel.Text = "Desktop"
+  $codexDesktopLabel.Location = New-Object System.Drawing.Point(20, 160)
+  $codexDesktopLabel.AutoSize = $true
+  $dialog.Controls.Add($codexDesktopLabel)
+  $codexDesktop = New-Object System.Windows.Forms.ComboBox
+  $codexDesktop.Location = New-Object System.Drawing.Point(170, 154)
+  $codexDesktop.Size = New-Object System.Drawing.Size(150, 24)
+  $codexDesktop.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$codexDesktop.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $codexDesktop.SelectedIndex = [Math]::Max(0, $codexDesktop.Items.IndexOf($script:CodexDesktopGroup))
+  $dialog.Controls.Add($codexDesktop)
+
+  $codexCliLabel = New-Object System.Windows.Forms.Label
+  $codexCliLabel.Text = "CLI"
+  $codexCliLabel.Location = New-Object System.Drawing.Point(20, 188)
+  $codexCliLabel.AutoSize = $true
+  $dialog.Controls.Add($codexCliLabel)
+  $codexCli = New-Object System.Windows.Forms.ComboBox
+  $codexCli.Location = New-Object System.Drawing.Point(170, 182)
+  $codexCli.Size = New-Object System.Drawing.Size(150, 24)
+  $codexCli.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$codexCli.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $codexCli.SelectedIndex = [Math]::Max(0, $codexCli.Items.IndexOf($script:CodexCliGroup))
+  $dialog.Controls.Add($codexCli)
+
+  $sshLabel = New-Object System.Windows.Forms.Label
+  $sshLabel.Text = "Remote (SSH)"
+  $sshLabel.Location = New-Object System.Drawing.Point(20, 216)
+  $sshLabel.AutoSize = $true
+  $dialog.Controls.Add($sshLabel)
+  $ssh = New-Object System.Windows.Forms.ComboBox
+  $ssh.Location = New-Object System.Drawing.Point(170, 210)
+  $ssh.Size = New-Object System.Drawing.Size(150, 24)
+  $ssh.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+  [void]$ssh.Items.AddRange(@("Group 1", "Group 2", "Group 3", "Hidden"))
+  $ssh.SelectedIndex = [Math]::Max(0, $ssh.Items.IndexOf($script:CodexSshGroup))
+  $dialog.Controls.Add($ssh)
+
+  $save = New-Object System.Windows.Forms.Button
+  $save.Text = "Save"
+  $save.DialogResult = [System.Windows.Forms.DialogResult]::OK
+  $save.Location = New-Object System.Drawing.Point(255, 242)
+  $save.Size = New-Object System.Drawing.Size(75, 25)
+  $dialog.AcceptButton = $save
+  $dialog.Controls.Add($save)
+
+  foreach ($control in $dialog.Controls) {
+    if ($control -is [System.Windows.Forms.CheckBox] -or $control -is [System.Windows.Forms.Label] -or $control -is [System.Windows.Forms.ComboBox]) {
+      $control.BackColor = $dialog.BackColor
+      $control.ForeColor = if ($control -eq $claudeLabel -or $control -eq $codexLabel -or $control -eq $dialogTitle) { [System.Drawing.Color]::White } else { [System.Drawing.Color]::FromArgb(210, 210, 210) }
+    }
+  }
+  $save.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+  $save.FlatAppearance.BorderSize = 0
+  $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
+  $save.ForeColor = [System.Drawing.Color]::White
+
+  if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    $script:ClaudeDesktopGroup = [string]$claudeDesktop.SelectedItem
+    $script:ClaudeCliGroup = [string]$claudeCli.SelectedItem
+    $script:CodexDesktopGroup = [string]$codexDesktop.SelectedItem
+    $script:CodexCliGroup = [string]$codexCli.SelectedItem
+    $script:CodexSshGroup = [string]$ssh.SelectedItem
+    New-Item -ItemType Directory -Force -Path $usageHome | Out-Null
+    @{
+      claude_desktop_group = $script:ClaudeDesktopGroup
+      claude_cli_group = $script:ClaudeCliGroup
+      codex_desktop_group = $script:CodexDesktopGroup
+      codex_cli_group = $script:CodexCliGroup
+      codex_ssh_group = $script:CodexSshGroup
+    } |
+      ConvertTo-Json | Set-Content -LiteralPath $displaySettingsFile -Encoding UTF8
+    Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
+    Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+  }
+  $dialog.Dispose()
+}
+
 function Format-ResetTime {
   param($EpochSeconds)
 
@@ -827,4 +1060,10 @@ try {
   $detail.Text = $_.Exception.Message
 }
 $timer.Start()
-[void][System.Windows.Forms.Application]::Run($form)
+try {
+  [void][System.Windows.Forms.Application]::Run($form)
+} finally {
+  $timer.Stop()
+  $overlayMutex.ReleaseMutex()
+  $overlayMutex.Dispose()
+}

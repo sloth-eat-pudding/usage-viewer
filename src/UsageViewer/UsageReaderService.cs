@@ -97,65 +97,35 @@ public sealed class UsageReaderService : IDisposable
         if (_codexWatcher is not null && !dirty && now < _nextCodexPollUtc) return;
         _nextCodexPollUtc = now + CodexPollInterval;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
-        var latest = FindLatestCodexUsage(root);
-        var remoteLatest = FindLatestCodexUsage(Path.Combine(_home, "remote-codex", "sessions"));
-        if (remoteLatest is not null && (latest is null || remoteLatest.Value.Time > latest.Value.Time))
-            latest = remoteLatest;
-        if (latest is null)
+        var localCandidates = new List<CodexCandidate>();
+        foreach (var mode in new[] { "desktop", "cli" })
         {
-            PromoteRemoteCodexSnapshot();
-            return;
+            var local = FindLatestCodexUsage(root, mode);
+            if (local is not null)
+            {
+                localCandidates.Add(local.Value);
+                WriteCodexSnapshot($"codex-{mode}-latest.json", local.Value);
+            }
         }
-
-        if (latest.Value.Mode.Equals("desktop", StringComparison.OrdinalIgnoreCase))
-            WriteCodexSnapshot("codex-desktop-latest.json", latest.Value);
-        if (latest.Value.Mode.Equals("cli", StringComparison.OrdinalIgnoreCase))
-            WriteCodexSnapshot("codex-cli-latest.json", latest.Value);
-        WriteCodexSnapshot("codex-app-latest.json", latest.Value);
-        PromoteRemoteCodexSnapshot();
+        var selectedLocal = localCandidates.OrderByDescending(candidate => candidate.Time).FirstOrDefault();
+        if (selectedLocal.File is not null) WriteCodexSnapshot("codex-app-latest.json", selectedLocal);
+        var remoteLatest = FindLatestCodexUsage(Path.Combine(_home, "remote-codex", "sessions"));
+        if (remoteLatest is not null && IsSnapshotNotOlder("codex-remote-latest.json", remoteLatest.Value.Time))
+            WriteCodexSnapshot("codex-remote-latest.json", remoteLatest.Value);
     }
 
-    private void PromoteRemoteCodexSnapshot()
+    private bool IsSnapshotNotOlder(string fileName, DateTimeOffset candidateTime)
     {
-        var remotePath = Path.Combine(_home, "codex-remote-latest.json");
-        if (!File.Exists(remotePath)) return;
-
+        var path = Path.Combine(_home, fileName);
+        if (!File.Exists(path)) return true;
         try
         {
-            using var remoteDocument = JsonDocument.Parse(File.ReadAllText(remotePath));
-            var remote = remoteDocument.RootElement;
-            if (!remote.TryGetProperty("resets_at", out _) ||
-                !remote.TryGetProperty("percentages", out _)) return;
-
-            var remoteObserved = ReadSnapshotTime(remote, "observed_at") ??
-                                 ReadSnapshotTime(remote, "generated_at");
-            if (remoteObserved is null) return;
-
-            var localPath = Path.Combine(_home, "codex-app-latest.json");
-            if (File.Exists(localPath))
-            {
-                using var localDocument = JsonDocument.Parse(File.ReadAllText(localPath));
-                var local = localDocument.RootElement;
-                var localObserved = ReadSnapshotTime(local, "observed_at") ??
-                                     ReadSnapshotTime(local, "generated_at");
-                if (localObserved is not null && localObserved >= remoteObserved) return;
-            }
-
-            WriteJson("codex-app-latest.json", remote.Clone());
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            var timestamp = StringOrNull(root, "observed_at") ?? StringOrNull(root, "generated_at");
+            return !DateTimeOffset.TryParse(timestamp, out var currentTime) || candidateTime >= currentTime;
         }
-        catch (Exception error)
-        {
-            TraceClaude($"remote codex snapshot ignored={error.Message}");
-        }
-    }
-
-    private static DateTimeOffset? ReadSnapshotTime(JsonElement root, string property)
-    {
-        return root.TryGetProperty(property, out var value) &&
-               value.ValueKind == JsonValueKind.String &&
-               DateTimeOffset.TryParse(value.GetString(), out var parsed)
-            ? parsed
-            : null;
+        catch { return true; }
     }
 
     private void WriteCodexSnapshot(string fileName, CodexCandidate latest)
@@ -174,6 +144,7 @@ public sealed class UsageReaderService : IDisposable
             : latest.Json.TryGetProperty("payload", out var nestedPayload) && nestedPayload.TryGetProperty("rate_limits", out var nestedRl) && nestedRl.ValueKind == JsonValueKind.Object
                 ? nestedRl
                 : default;
+        var fiveHour = FindRateLimitWindow(rateLimits, 300);
         var sevenDay = FindRateLimitWindow(rateLimits, 10080);
 
         WriteJson(fileName, new {
@@ -183,13 +154,12 @@ public sealed class UsageReaderService : IDisposable
             percentages = new {
                 context_used = (double?)null,
                 cached_input = input > 0 ? cached * 100 / input : 0,
-                // Codex Desktop exposes the weekly window only.
-                five_hour_used = (double?)null,
+                five_hour_used = NumberOrNull(fiveHour, "used_percent"),
                 seven_day_used = NumberOrNull(sevenDay, "used_percent"),
                 primary_limit_used = NumberOrNull(sevenDay, "used_percent")
             },
             resets_at = new {
-                five_hour_epoch_seconds = (double?)null,
+                five_hour_epoch_seconds = NumberOrNull(fiveHour, "resets_at"),
                 seven_day_epoch_seconds = NumberOrNull(sevenDay, "resets_at")
             },
             rate_limits = new {
@@ -199,7 +169,7 @@ public sealed class UsageReaderService : IDisposable
         });
     }
 
-    private static CodexCandidate? FindLatestCodexUsage(string root)
+    private static CodexCandidate? FindLatestCodexUsage(string root, string? requiredMode = null)
     {
         if (!Directory.Exists(root)) return null;
 
@@ -218,7 +188,8 @@ public sealed class UsageReaderService : IDisposable
         // creates a new YYYY\\MM\\DD directory or appends to an older file.
         return files
             .Select(item => ReadCodexUsageFile(item.File, item.Mtime))
-            .Where(candidate => candidate is not null)
+            .Where(candidate => candidate is not null &&
+                (requiredMode is null || candidate.Value.Mode.Equals(requiredMode, StringComparison.OrdinalIgnoreCase)))
             .Select(candidate => candidate!.Value)
             .OrderByDescending(candidate => candidate.Time)
             .FirstOrDefault();

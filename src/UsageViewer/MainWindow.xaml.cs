@@ -20,11 +20,15 @@ public partial class MainWindow : Window
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly UsageReaderService _reader = new();
+    private string _codexDisplayMode = "combined";
 
     public MainWindow()
     {
         InitializeComponent();
         LoadWindowState();
+        var startupMode = Environment.GetCommandLineArgs().FirstOrDefault(arg => arg is "--combined" or "--separate");
+        if (startupMode is "--combined" or "--separate") _codexDisplayMode = startupMode[2..];
+        UpdateModeButton();
         SourceInitialized += (_, _) => EnsureTopmost();
         Activated += (_, _) => EnsureTopmost();
         Deactivated += (_, _) => Dispatcher.BeginInvoke(EnsureTopmost, DispatcherPriority.Background);
@@ -40,12 +44,26 @@ public partial class MainWindow : Window
     private void Refresh()
     {
         var claude = Read("claude-app-latest.json");
-        var codex = Read("codex-app-latest.json");
         var lines = new List<string>();
         if (claude is not null) lines.Add($"Claude  {ClaudeUsageLine(claude)}");
-        if (codex is not null) lines.Add($"Codex   {CodexUsageLine(codex)}");
+        var codexSnapshots = CodexSnapshots();
+        foreach (var (label, snapshot) in codexSnapshots)
+            lines.Add($"Codex {label,-4}{CodexUsageLine(snapshot)}");
         MainText.Text = lines.Count == 0 ? "Waiting for usage..." : string.Join("\n", lines);
-        DetailText.Text = AllDetails(claude, codex);
+        DetailText.Text = AllDetails(claude, codexSnapshots);
+    }
+
+    private List<(string Label, JsonElement? Snapshot)> CodexSnapshots()
+    {
+        var result = new List<(string, JsonElement?)>();
+        if (_codexDisplayMode == "separate")
+        {
+            Add("", "codex-app-latest.json");
+            Add("SSH", "codex-remote-latest.json");
+        }
+        else Add("", "codex-app-latest.json");
+        return result;
+        void Add(string label, string file) { var snapshot = Read(file); if (snapshot is not null) result.Add((label, snapshot)); }
     }
 
     private JsonElement? Read(string name)
@@ -62,7 +80,7 @@ public partial class MainWindow : Window
 
     private static string Percent(JsonElement? root, string name)
     {
-        if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return "?";
+        if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return "-";
         return $"{value.GetDouble():0.##}%";
     }
 
@@ -77,20 +95,7 @@ public partial class MainWindow : Window
     {
         var weekly = Percent(root, "seven_day_used");
         var fiveHour = Percent(root, "five_hour_used");
-        var parts = new List<string>();
-        if (weekly != "?") parts.Add($"7d {weekly}");
-        if (fiveHour != "?") parts.Add($"5h {fiveHour}");
-        if (parts.Count > 0) return string.Join("  |  ", parts);
-        return "usage unavailable";
-    }
-
-    private static string CodexSourceSuffix(JsonElement? root)
-    {
-        if (root is not null && root.Value.TryGetProperty("source_mode", out var mode) && mode.ValueKind == JsonValueKind.String)
-        {
-            return mode.GetString() == "cli" ? "(C)" : "(D)";
-        }
-        return "";
+        return $"7d {weekly}  |  5h {fiveHour}";
     }
 
     private static string ClaudeSourceSuffix(JsonElement? root)
@@ -130,13 +135,16 @@ public partial class MainWindow : Window
         return string.Join(" | ", parts);
     }
 
-    private static string AllDetails(JsonElement? claude, JsonElement? codex)
+    private static string AllDetails(JsonElement? claude, List<(string Label, JsonElement? Snapshot)> codexSnapshots)
     {
         var lines = new List<string>();
         var claudeDetails = ClaudeDetails(claude);
-        var codexDetails = CodexDetails(codex);
         if (!string.IsNullOrWhiteSpace(claudeDetails)) lines.Add($"Claude  {claudeDetails}  {ClaudeSourceSuffix(claude)}");
-        if (!string.IsNullOrWhiteSpace(codexDetails)) lines.Add($"Codex   {codexDetails}  {CodexSourceSuffix(codex)}");
+        foreach (var (label, snapshot) in codexSnapshots)
+        {
+            var details = CodexDetails(snapshot);
+            if (!string.IsNullOrWhiteSpace(details)) lines.Add($"Codex {label,-4}{details}");
+        }
         return string.Join("\n", lines);
     }
 
@@ -237,6 +245,7 @@ public partial class MainWindow : Window
             if (!File.Exists(path)) return;
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
+            if (root.TryGetProperty("codex_display_mode", out var mode) && mode.ValueKind == JsonValueKind.String && mode.GetString() is ("combined" or "separate")) _codexDisplayMode = mode.GetString()!;
             if (root.TryGetProperty("left", out var left)) Left = left.GetDouble();
             else if (root.TryGetProperty("x", out var x)) Left = x.GetDouble();
             if (root.TryGetProperty("top", out var top)) Top = top.GetDouble();
@@ -250,9 +259,19 @@ public partial class MainWindow : Window
         try
         {
             Directory.CreateDirectory(_home);
-            var state = new { left = Left, top = Top };
+            var state = new { left = Left, top = Top, codex_display_mode = _codexDisplayMode };
             File.WriteAllText(Path.Combine(_home, "window-state.json"), JsonSerializer.Serialize(state));
         }
         catch { }
     }
+
+    private void OnModeClick(object sender, RoutedEventArgs e)
+    {
+        _codexDisplayMode = _codexDisplayMode == "combined" ? "separate" : "combined";
+        UpdateModeButton();
+        SaveWindowState();
+        Refresh();
+    }
+
+    private void UpdateModeButton() => ModeButton.Content = _codexDisplayMode == "separate" ? "Separate" : "Combined";
 }

@@ -25,6 +25,10 @@ try {
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   if (snapshots.desktop) writeJsonAtomic(CODEX_DESKTOP_LATEST_FILE, snapshots.desktop)
   if (snapshots.cli) writeJsonAtomic(CODEX_CLI_LATEST_FILE, snapshots.cli)
+  if (snapshots.remote) writeSnapshotIfNotOlder(
+    path.join(USAGE_VIEWER_HOME, 'codex-remote-latest.json'),
+    snapshots.remote
+  )
   writeJsonAtomic(CODEX_APP_LATEST_FILE, snapshot)
   writeJsonAtomic(CODEX_LATEST_FILE, snapshot)
   writeJsonAtomic(LATEST_FILE, snapshot)
@@ -36,16 +40,17 @@ try {
 }
 
 function readCodexUsageByMode() {
-  const usageSessions = mergeUsageSessions(
-    findLatestUsageSessionsByMode(SESSIONS_DIRECTORY),
-    findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
-  )
-  const desktop = usageSessions.desktop
-    ? buildCodexSnapshot(usageSessions.desktop, 'desktop')
+  const localSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
+  const remoteSessions = findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
+  const desktop = localSessions.desktop
+    ? buildCodexSnapshot(localSessions.desktop, 'desktop')
     : null
-  const cli = usageSessions.cli
-    ? buildCodexSnapshot(usageSessions.cli, 'cli')
+  const cli = localSessions.cli
+    ? buildCodexSnapshot(localSessions.cli, 'cli')
     : null
+  const remoteSession = Object.values(remoteSessions)
+    .sort((left, right) => right.tokenTime - left.tokenTime)[0]
+  const remote = remoteSession ? buildCodexSnapshot(remoteSession, 'remote') : null
   const available = [desktop, cli].filter(Boolean)
 
   if (available.length === 0) {
@@ -55,21 +60,10 @@ function readCodexUsageByMode() {
   return {
     desktop,
     cli,
+    remote,
     selected: available.sort((left, right) =>
       Date.parse(right.observed_at) - Date.parse(left.observed_at))[0]
   }
-}
-
-function mergeUsageSessions(...sources) {
-  const merged = {}
-  for (const source of sources) {
-    for (const mode of ['desktop', 'cli']) {
-      if (source[mode] && (!merged[mode] || source[mode].tokenTime > merged[mode].tokenTime)) {
-        merged[mode] = source[mode]
-      }
-    }
-  }
-  return merged
 }
 
 function buildCodexSnapshot(usageSession, sourceMode) {
@@ -86,6 +80,7 @@ function buildCodexSnapshot(usageSession, sourceMode) {
   // Codex Desktop stores rate_limits beside payload, not inside payload.
   const rateLimits = tokenCount.rate_limits || (tokenCount.payload && tokenCount.payload.rate_limits) || {}
   const lastTotalTokens = toNumber(lastUsage.total_tokens)
+  const fiveHourLimit = findRateLimitWindow(rateLimits, 300)
   const sevenDayLimit = findRateLimitWindow(rateLimits, 10080)
 
   const inputTokens = toNumber(lastUsage.input_tokens)
@@ -141,8 +136,7 @@ function buildCodexSnapshot(usageSession, sourceMode) {
       context_used: null,
       context_remaining: null,
       cached_input: inputTokens > 0 ? (cachedInputTokens / inputTokens) * 100 : 0,
-      // Codex Desktop exposes the weekly window only.
-      five_hour_used: null,
+      five_hour_used: nullableNumber(fiveHourLimit.used_percent),
       seven_day_used: nullableNumber(sevenDayLimit.used_percent),
       primary_limit_used: nullableNumber(sevenDayLimit.used_percent)
     },
@@ -155,7 +149,7 @@ function buildCodexSnapshot(usageSession, sourceMode) {
       plan_type: nullableString(rateLimits.plan_type),
     },
     resets_at: {
-      five_hour_epoch_seconds: null,
+      five_hour_epoch_seconds: nullableNumber(fiveHourLimit.resets_at),
       seven_day_epoch_seconds: nullableNumber(sevenDayLimit.resets_at)
     }
   }
@@ -340,6 +334,23 @@ function writeJsonAtomic(filename, value) {
       // Best-effort cleanup.
     }
   }
+}
+
+function writeSnapshotIfNotOlder(filename, snapshot) {
+  if (fs.existsSync(filename)) {
+    try {
+      const current = JSON.parse(fs.readFileSync(filename, 'utf8'))
+      const currentTime = Date.parse(current.observed_at || current.generated_at || '')
+      const nextTime = Date.parse(snapshot.observed_at || snapshot.generated_at || '')
+      if (Number.isFinite(currentTime) && (!Number.isFinite(nextTime) || nextTime < currentTime)) {
+        return false
+      }
+    } catch {
+      // A partial or invalid previous snapshot may be safely replaced.
+    }
+  }
+  writeJsonAtomic(filename, snapshot)
+  return true
 }
 
 function replaceFile(temporaryFile, filename) {
