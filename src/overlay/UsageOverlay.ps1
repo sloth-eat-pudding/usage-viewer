@@ -190,8 +190,6 @@ $resetButton.Add_Click({
 })
 $panel.Controls.Add($resetButton)
 
-<<<<<<< HEAD
-=======
 $script:IsPinned = $false
 $script:pinHotkeyWasDown = $false
 $normalPanelColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
@@ -209,7 +207,6 @@ $pinButton.Text = "P"
 $pinButton.TabStop = $false
 $panel.Controls.Add($pinButton)
 
->>>>>>> 575b2ea (Add pinned overlay and flexible source grouping)
 $settingsButton = New-Object System.Windows.Forms.Button
 $settingsButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $settingsButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
@@ -895,7 +892,7 @@ function Show-DisplaySettings {
   $dialog.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
   $dialog.ForeColor = [System.Drawing.Color]::White
   $dialog.Opacity = 0.96
-  $dialog.ClientSize = New-Object System.Drawing.Size(350, 275)
+  $dialog.ClientSize = New-Object System.Drawing.Size(350, 365)
 
   $dialogTitle = New-Object System.Windows.Forms.Label
   $dialogTitle.Text = "Display settings"
@@ -999,10 +996,37 @@ function Show-DisplaySettings {
   $ssh.SelectedIndex = [Math]::Max(0, $ssh.Items.IndexOf($script:CodexSshGroup))
   $dialog.Controls.Add($ssh)
 
+  $accountLabel = New-Object System.Windows.Forms.Label
+  $accountLabel.Text = "Claude user environment"
+  $accountLabel.Location = New-Object System.Drawing.Point(15, 248)
+  $accountLabel.AutoSize = $true
+  $dialog.Controls.Add($accountLabel)
+
+  $defaultAccount = New-Object System.Windows.Forms.Button
+  $defaultAccount.Text = "Open Default"
+  $defaultAccount.Location = New-Object System.Drawing.Point(20, 275)
+  $defaultAccount.Size = New-Object System.Drawing.Size(145, 28)
+  $defaultAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "default" -StatusLabel $accountStatus })
+  $dialog.Controls.Add($defaultAccount)
+
+  $workAccount = New-Object System.Windows.Forms.Button
+  $workAccount.Text = "Open Work"
+  $workAccount.Location = New-Object System.Drawing.Point(175, 275)
+  $workAccount.Size = New-Object System.Drawing.Size(145, 28)
+  $workAccount.Add_Click({ Start-ClaudeUserEnvironment -EnvironmentName "work" -StatusLabel $accountStatus })
+  $dialog.Controls.Add($workAccount)
+
+  $accountStatus = New-Object System.Windows.Forms.Label
+  $accountStatus.Text = "Default and Work keep separate login sessions."
+  $accountStatus.Location = New-Object System.Drawing.Point(20, 309)
+  $accountStatus.Size = New-Object System.Drawing.Size(305, 20)
+  $accountStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
+  $dialog.Controls.Add($accountStatus)
+
   $save = New-Object System.Windows.Forms.Button
   $save.Text = "Save"
   $save.DialogResult = [System.Windows.Forms.DialogResult]::OK
-  $save.Location = New-Object System.Drawing.Point(255, 242)
+  $save.Location = New-Object System.Drawing.Point(255, 334)
   $save.Size = New-Object System.Drawing.Size(75, 25)
   $dialog.AcceptButton = $save
   $dialog.Controls.Add($save)
@@ -1017,6 +1041,12 @@ function Show-DisplaySettings {
   $save.FlatAppearance.BorderSize = 0
   $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
   $save.ForeColor = [System.Drawing.Color]::White
+  foreach ($button in @($defaultAccount, $workAccount)) {
+    $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $button.FlatAppearance.BorderSize = 0
+    $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
+    $button.ForeColor = [System.Drawing.Color]::White
+  }
 
   if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     $script:ClaudeDesktopGroup = [string]$claudeDesktop.SelectedItem
@@ -1037,6 +1067,51 @@ function Show-DisplaySettings {
     Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
   }
   $dialog.Dispose()
+}
+
+function Get-ClaudeDesktopExecutable {
+  try {
+    $package = Get-AppxPackage -Name "Claude" -ErrorAction Stop | Select-Object -First 1
+    if ($null -ne $package) {
+      $candidate = Join-Path $package.InstallLocation "app\Claude.exe"
+      if (Test-Path -LiteralPath $candidate) { return $candidate }
+    }
+  } catch { }
+
+  foreach ($candidate in @(
+    (Join-Path $env:LOCALAPPDATA "AnthropicClaude\Claude.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Claude\Claude.exe"),
+    (Join-Path $env:LOCALAPPDATA "Claude\Claude.exe")
+  )) {
+    if (Test-Path -LiteralPath $candidate) { return $candidate }
+  }
+  return $null
+}
+
+function Start-ClaudeUserEnvironment {
+  param(
+    [ValidateSet("default", "work")][string]$EnvironmentName,
+    [System.Windows.Forms.Label]$StatusLabel
+  )
+
+  try {
+    if ($EnvironmentName -eq "default") {
+      $app = Get-StartApps | Where-Object { $_.Name -eq "Claude" } | Select-Object -First 1
+      if ($null -eq $app) { throw "Claude Start Menu app was not found." }
+      Start-Process -FilePath "explorer.exe" -ArgumentList "shell:AppsFolder\$($app.AppID)"
+      $StatusLabel.Text = "Opened Claude Default."
+      return
+    }
+
+    $executable = Get-ClaudeDesktopExecutable
+    if ([string]::IsNullOrWhiteSpace($executable)) { throw "Claude.exe was not found." }
+    $profileDirectory = Join-Path $env:LOCALAPPDATA "Claude-Work"
+    New-Item -ItemType Directory -Force -Path $profileDirectory | Out-Null
+    Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profileDirectory`""
+    $StatusLabel.Text = "Opened Claude Work. Sign in once to save this session."
+  } catch {
+    $StatusLabel.Text = "Unable to open Claude: $($_.Exception.Message)"
+  }
 }
 
 function Format-ResetTime {

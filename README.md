@@ -78,6 +78,8 @@ Overlay 右上角的 `Settings` 會開啟自由來源群組設定頁。Claude De
 
 設定頁採用與主 overlay 一致的深色無框、扁平按鈕與右上角關閉鍵風格。
 
+Windows 的 Settings 另有 `Claude user environment`：`Open Default` 透過目前安裝的 Start Menu Claude 啟動預設帳號；`Open Work` 會動態尋找 Store/MSIX 或傳統安裝的 Claude.exe，並以 `%LOCALAPPDATA%\Claude-Work` 作為獨立 `--user-data-dir`。兩個環境各自保存登入 Cookie、session 與設定，不需反覆登出登入。
+
 可使用 `scripts\sync-codex-remote.ps1` 自動同步。腳本目前已設定連線到 `jerry@192.168.2.57`，只會透過 SCP 複製遠端 `~/.codex/sessions`，遠端不需要安裝 Python、Node.js 或本專案。
 
 Usage Viewer 啟動時會自動在背景啟動這個同步器，關閉 Viewer 時也會一併停止；不需要另外手動執行 PowerShell。重新啟動 Viewer 後即可套用設定。
