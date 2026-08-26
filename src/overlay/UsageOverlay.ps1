@@ -236,17 +236,24 @@ $closeButton.Add_Click({ $form.Close() })
 $panel.Controls.Add($closeButton)
 
 $applyPinState = {
-  [ResizableOverlayForm]::ClickThrough = $script:IsPinned
-  $pinButton.Visible = -not $script:IsPinned
+  # Keep P available so the overlay can always be unlocked with a second click.
+  # Other controls and window manipulation are disabled while pinned.
+  [ResizableOverlayForm]::ClickThrough = $false
+  $pinButton.Visible = $true
+  $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
+  $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
   $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
+  $costToggle.Enabled = -not $script:IsPinned
   if ($script:IsPinned) {
     $panel.BackColor = $form.TransparencyKey
     $form.BackColor = $form.TransparencyKey
   } else {
     $panel.BackColor = $normalPanelColor
-    $form.BackColor = [System.Drawing.Color]::Transparent
+    # Keep the Form background on the same keyed color. Transparent is not a
+    # valid replacement for TransparencyKey on all Windows Forms versions.
+    $form.BackColor = $form.TransparencyKey
   }
 }
 $pinButton.Add_Click({
@@ -313,6 +320,9 @@ $dragStart = New-Object System.Drawing.Point(0, 0)
 
 $mouseDown = {
   if ($_.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+    if ($script:IsPinned) {
+      return
+    }
     $hitTest = Get-ResizeHitTest -Form $form
 
     if ($hitTest -ne 0) {
@@ -349,6 +359,7 @@ foreach ($control in @($form, $panel, $title, $main, $detail, $costToggle)) {
 }
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
+$menu.Add_Opening({ $_.Cancel = $script:IsPinned })
 $closeItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $closeItem.Text = "Close"
 $closeItem.Add_Click({ $form.Close() })
@@ -358,6 +369,10 @@ $panel.ContextMenuStrip = $menu
 
 function Get-ResizeHitTest {
   param([System.Windows.Forms.Form]$Form)
+
+  if ($script:IsPinned) {
+    return 0
+  }
 
   $grip = 10
   $cursor = $Form.PointToClient([System.Windows.Forms.Cursor]::Position)
