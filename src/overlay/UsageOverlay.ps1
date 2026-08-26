@@ -248,15 +248,10 @@ $applyPinState = {
   $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
   $costToggle.Enabled = -not $script:IsPinned
-  if ($script:IsPinned) {
-    $panel.BackColor = $form.TransparencyKey
-    $form.BackColor = $form.TransparencyKey
-  } else {
-    $panel.BackColor = $normalPanelColor
-    # Keep the Form background on the same keyed color. Transparent is not a
-    # valid replacement for TransparencyKey on all Windows Forms versions.
-    $form.BackColor = $form.TransparencyKey
-  }
+  # Locking must keep the usage content visible. Only interaction is locked;
+  # the panel and form retain their normal colors.
+  $panel.BackColor = $normalPanelColor
+  $form.BackColor = $form.TransparencyKey
 }
 $pinButton.Add_Click({
   $script:IsPinned = -not $script:IsPinned
