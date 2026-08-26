@@ -243,7 +243,7 @@ $applyPinState = {
   [ResizableOverlayForm]::ClickThrough = $false
   $pinButton.Visible = $true
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
-  $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
+  $pinButton.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
   $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
@@ -252,6 +252,7 @@ $applyPinState = {
   # the panel and form retain their normal colors.
   $panel.BackColor = $normalPanelColor
   $form.BackColor = $form.TransparencyKey
+  Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
 }
 $pinButton.Add_Click({
   $script:IsPinned = -not $script:IsPinned
@@ -305,7 +306,7 @@ $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 13)
   $main.Width = $width
   $detail.Width = $width
-  $pinButton.Left = $panel.ClientSize.Width - 128
+  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 128 }
   $resetButton.Left = $panel.ClientSize.Width - 44
   $closeButton.Left = $panel.ClientSize.Width - 22
 }
@@ -590,12 +591,13 @@ function Resize-OverlayToContent {
   $gap = 1
   $right = 6
   $bottom = 7
-  $buttonArea = 78
+  $buttonArea = if ($script:IsPinned) { 26 } else { 78 }
   $mainVerticalPadding = 2
   $detailVerticalPadding = 5
 
   $contentWidth = [Math]::Max($mainSize.Width + $buttonArea, $detailSize.Width)
-  $desiredWidth = [Math]::Min(900, [Math]::Max(340, $left + $contentWidth + $right))
+  $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
+  $desiredWidth = [Math]::Min(900, [Math]::Max($minimumWidth, $left + $contentWidth + $right))
   $mainHeight = $mainSize.Height + $mainVerticalPadding
   $detailHeight = $detailSize.Height + $detailVerticalPadding
   $desiredHeight = [Math]::Max($Form.MinimumSize.Height, $top + $mainHeight + $gap + $detailHeight + $bottom)
