@@ -584,14 +584,25 @@ function Read-ClaudePlanUsageJson {
     $root = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     if ($null -eq $root.samples -or @($root.samples).Count -eq 0) { return $null }
     $sample = @($root.samples | Sort-Object { [int64]$_.t })[-1]
+    $apiUsage = $null
+    if ($sample.org) {
+      $apiFile = Join-Path $usageHome "claude-desktop-api-$([string]$sample.org)-latest.json"
+      $candidate = Read-UsageJson $apiFile
+      if ($candidate -and $candidate.source -eq "claude-desktop-api-bridge") {
+        try {
+          $observedAt = [DateTimeOffset]::Parse([string]$(if ($candidate.observed_at) { $candidate.observed_at } else { $candidate.generated_at }))
+          if (([DateTimeOffset]::UtcNow - $observedAt.ToUniversalTime()).TotalMinutes -le 5) { $apiUsage = $candidate }
+        } catch { }
+      }
+    }
     [pscustomobject]@{
       percentages = [pscustomobject]@{
-        five_hour_used = [double]$sample.u.fh
-        seven_day_used = [double]$sample.u.sd
+        five_hour_used = if ($apiUsage -and $null -ne $apiUsage.percentages.five_hour_used) { [double]$apiUsage.percentages.five_hour_used } else { [double]$sample.u.fh }
+        seven_day_used = if ($apiUsage -and $null -ne $apiUsage.percentages.seven_day_used) { [double]$apiUsage.percentages.seven_day_used } else { [double]$sample.u.sd }
       }
       resets_at = [pscustomobject]@{
-        five_hour_epoch_seconds = $null
-        seven_day_epoch_seconds = $null
+        five_hour_epoch_seconds = if ($apiUsage) { $apiUsage.resets_at.five_hour_epoch_seconds } else { $null }
+        seven_day_epoch_seconds = if ($apiUsage) { $apiUsage.resets_at.seven_day_epoch_seconds } else { $null }
       }
       source = "claude-custom-plan-usage-history"
       source_mode = "desktop"
@@ -629,6 +640,12 @@ function Update-CombinedUsageView {
       $ssh = $script:CodexSshSources[$sshIndex]
       $sshGroup = Convert-GroupCode $(if ($ssh.group) { [string]$ssh.group } else { "1" })
       $sshFile = Join-Path $usageHome "codex-remote-$sshIndex-latest.json"
+      # Older/background readers publish the first remote source under the
+      # unindexed legacy filename.  Keep that source visible while newer
+      # readers publish one snapshot per configured SSH source.
+      if ($sshIndex -eq 0 -and -not (Test-Path -LiteralPath $sshFile)) {
+        $sshFile = $codexRemoteUsageFile
+      }
       if ($sshGroup -ne "Hidden") { $codexSources += @{ Label = if ($ssh.name) { [string]$ssh.name } else { "SSH $($sshIndex + 1)" }; Group = $sshGroup; Data = (Read-UsageJson $sshFile) } }
     }
   }

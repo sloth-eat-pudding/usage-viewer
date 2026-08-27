@@ -51,6 +51,30 @@ Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`�
 
 將 [`config/settings.json`](config/settings.json) 的 `statusLine` 設定合併到 `%USERPROFILE%\.claude\settings.json`，並把 command 中的路徑改成此專案內 `src\readers\statusline-usage-capture.js` 的實際絕對路徑。
 
+## Claude Desktop 精確重置時間（可選）
+
+Usage Viewer 啟動時會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
+
+在 Claude Desktop 啟用 Developer Mode 後，於 DevTools Console 執行下列程式一次，將 `<org-id>` 換成 Network 中 usage request 的組織 ID：
+
+```js
+const orgIds = ['<first-org-id>', '<second-org-id>']
+window.forwardClaudeDesktopUsage = async () => {
+  await Promise.all(orgIds.map(async orgId => {
+    const usage = await fetch(`/api/organizations/${orgId}/usage`).then(response => response.json())
+    await fetch(`http://127.0.0.1:8765/claude-desktop-usage?org=${encodeURIComponent(orgId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(usage)
+    })
+  }))
+}
+window.forwardClaudeDesktopUsage()
+window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 60_000)
+```
+
+收到 bridge snapshot 後，Claude Desktop reader 會在五分鐘內優先採用其中精確的重置時間；超時後自動回退到本機 usage history 的推估值。
+
 ## 遠端 Codex 同步（可選）
 
 複製 `config\remote.env.example` 為 `config\remote.env`，再填入你的 SSH 連線資訊：

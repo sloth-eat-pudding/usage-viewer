@@ -91,7 +91,17 @@ public partial class MainWindow : Window
         new UsageSource("C", _displaySettings.CodexCliGroup, Read("codex-cli-latest.json"))
     }.Concat(_displaySettings.CodexSshSources.Select((source, index) =>
             new UsageSource(string.IsNullOrWhiteSpace(source.Name) ? $"SSH {index + 1}" : source.Name,
-                source.Group, Read($"codex-remote-{index}-latest.json")))).ToList();
+                source.Group, ReadRemoteSnapshot(index)))).ToList();
+
+    private JsonElement? ReadRemoteSnapshot(int index)
+    {
+        var indexedFile = $"codex-remote-{index}-latest.json";
+        // Older/background readers use the legacy unindexed name for the
+        // first SSH source. Prefer the indexed snapshot when it exists.
+        return index == 0 && !File.Exists(Path.Combine(_home, indexedFile))
+            ? Read("codex-remote-latest.json")
+            : Read(indexedFile);
+    }
 
     private static void AppendGroupedUsage(
         List<string> lines,

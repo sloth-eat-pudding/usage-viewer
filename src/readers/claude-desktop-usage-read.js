@@ -29,6 +29,7 @@ const CLAUDE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-latest.json')
 const CLAUDE_DESKTOP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-desktop-latest.json')
 const CLAUDE_STATUSLINE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-statusline-latest.json')
 const HISTORY_FILE = path.join(USAGE_VIEWER_HOME, 'history.jsonl')
+const DESKTOP_API_SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000
 
 try {
   const snapshot = readClaudeDesktopUsage()
@@ -54,18 +55,17 @@ function readClaudeDesktopUsage() {
   const sourceFileMtime = new Date(latest.mtimeMs).toISOString()
   const message = entry.message || {}
   const planUsage = readLatestPlanUsage()
-  const previous = readJson(CLAUDE_LATEST_FILE)
-  const previousResets = previous && previous.resets_at ? previous.resets_at : {}
+  const desktopApiUsage = readLatestDesktopApiUsage(planUsage ? planUsage.org : null)
   const statusLineResets = readLatestStatusLineResets()
   const estimatedResets = estimatePlanUsageResets()
   const fiveHourReset = firstFutureEpochSeconds([
+    desktopApiUsage.resets_at.five_hour_epoch_seconds,
     statusLineResets.five_hour_epoch_seconds,
-    previousResets.five_hour_epoch_seconds,
     estimatedResets.five_hour_epoch_seconds
   ])
   const sevenDayReset = firstFutureEpochSeconds([
+    desktopApiUsage.resets_at.seven_day_epoch_seconds,
     statusLineResets.seven_day_epoch_seconds,
-    previousResets.seven_day_epoch_seconds,
     estimatedResets.seven_day_epoch_seconds
   ])
 
@@ -91,8 +91,8 @@ function readClaudeDesktopUsage() {
     percentages: {
       context_used: null,
       context_remaining: null,
-      five_hour_used: planUsage ? nullableNumber(planUsage.usage.fh) : null,
-      seven_day_used: planUsage ? nullableNumber(planUsage.usage.sd) : null
+      five_hour_used: desktopApiUsage.percentages.five_hour_used ?? (planUsage ? nullableNumber(planUsage.usage.fh) : null),
+      seven_day_used: desktopApiUsage.percentages.seven_day_used ?? (planUsage ? nullableNumber(planUsage.usage.sd) : null)
     },
     resets_at: {
       five_hour_epoch_seconds: fiveHourReset,
@@ -103,10 +103,43 @@ function readClaudeDesktopUsage() {
       seven_day_epoch_seconds: estimatedResets.seven_day_epoch_seconds,
       source: estimatedResets.source
     },
+    reset_source: desktopApiUsage.observed_at ? 'claude-desktop-api-bridge' : estimatedResets.source,
     plan_usage: {
       source_file: planUsage ? PLAN_USAGE_HISTORY_FILE : null,
       observed_at: planUsage ? new Date(planUsage.timestamp).toISOString() : null,
       org: planUsage ? nullableString(planUsage.org) : null
+    },
+    desktop_api: {
+      observed_at: desktopApiUsage.observed_at
+    }
+  }
+}
+
+function readLatestDesktopApiUsage(organizationId) {
+  const empty = {
+    observed_at: null,
+    percentages: { five_hour_used: null, seven_day_used: null },
+    resets_at: { five_hour_epoch_seconds: null, seven_day_epoch_seconds: null }
+  }
+  if (!organizationId) return empty
+  const filename = path.join(USAGE_VIEWER_HOME, `claude-desktop-api-${organizationId}-latest.json`)
+  const latest = readJson(filename)
+  if (!latest || latest.source !== 'claude-desktop-api-bridge' || latest.organization_id !== organizationId) return empty
+
+  const observedAt = Date.parse(latest.observed_at || latest.generated_at || '')
+  if (!Number.isFinite(observedAt) || Date.now() - observedAt > DESKTOP_API_SNAPSHOT_MAX_AGE_MS) return empty
+
+  const percentages = latest.percentages || {}
+  const resets = latest.resets_at || {}
+  return {
+    observed_at: new Date(observedAt).toISOString(),
+    percentages: {
+      five_hour_used: nullableNumber(percentages.five_hour_used),
+      seven_day_used: nullableNumber(percentages.seven_day_used)
+    },
+    resets_at: {
+      five_hour_epoch_seconds: futureEpochSeconds(resets.five_hour_epoch_seconds),
+      seven_day_epoch_seconds: futureEpochSeconds(resets.seven_day_epoch_seconds)
     }
   }
 }

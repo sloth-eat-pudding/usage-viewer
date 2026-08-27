@@ -12,6 +12,8 @@ const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
 
 const SESSIONS_DIRECTORY = path.join(CODEX_HOME, 'sessions')
 const REMOTE_SESSIONS_DIRECTORY = path.join(USAGE_VIEWER_HOME, 'remote-codex', 'sessions')
+const REMOTE_CACHE_DIRECTORY = path.join(USAGE_VIEWER_HOME, 'remote-codex')
+const REMOTE_SOURCES_FILE = path.join(USAGE_VIEWER_HOME, 'remote-sources.json')
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CODEX_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-latest.json')
 const CODEX_APP_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-app-latest.json')
@@ -25,6 +27,12 @@ try {
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   if (snapshots.desktop) writeJsonAtomic(CODEX_DESKTOP_LATEST_FILE, snapshots.desktop)
   if (snapshots.cli) writeJsonAtomic(CODEX_CLI_LATEST_FILE, snapshots.cli)
+  snapshots.remotes.forEach((remote, index) => {
+    if (remote) writeSnapshotIfNotOlder(
+      path.join(USAGE_VIEWER_HOME, `codex-remote-${index}-latest.json`),
+      remote
+    )
+  })
   if (snapshots.remote) writeSnapshotIfNotOlder(
     path.join(USAGE_VIEWER_HOME, 'codex-remote-latest.json'),
     snapshots.remote
@@ -41,6 +49,7 @@ try {
 
 function readCodexUsageByMode() {
   const localSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
+  const remotes = readConfiguredRemoteSnapshots()
   const remoteSessions = findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
   const desktop = localSessions.desktop
     ? buildCodexSnapshot(localSessions.desktop, 'desktop')
@@ -50,7 +59,9 @@ function readCodexUsageByMode() {
     : null
   const remoteSession = Object.values(remoteSessions)
     .sort((left, right) => right.tokenTime - left.tokenTime)[0]
-  const remote = remoteSession ? buildCodexSnapshot(remoteSession, 'remote') : null
+  // Keep the legacy snapshot for existing installations, but prefer the
+  // configured source cache that the SSH synchronizer now maintains.
+  const remote = remotes[0] || (remoteSession ? buildCodexSnapshot(remoteSession, 'remote') : null)
   const available = [desktop, cli].filter(Boolean)
 
   if (available.length === 0) {
@@ -60,10 +71,30 @@ function readCodexUsageByMode() {
   return {
     desktop,
     cli,
+    remotes,
     remote,
     selected: available.sort((left, right) =>
       Date.parse(right.observed_at) - Date.parse(left.observed_at))[0]
   }
+}
+
+function readConfiguredRemoteSnapshots() {
+  let sources = []
+  try {
+    const configured = JSON.parse(fs.readFileSync(REMOTE_SOURCES_FILE, 'utf8'))
+    sources = Array.isArray(configured.sources) ? configured.sources : []
+  } catch {
+    return []
+  }
+
+  return sources.map((_, index) => {
+    const sessions = findLatestUsageSessionsByMode(
+      path.join(REMOTE_CACHE_DIRECTORY, String(index), 'sessions')
+    )
+    const session = Object.values(sessions)
+      .sort((left, right) => right.tokenTime - left.tokenTime)[0]
+    return session ? buildCodexSnapshot(session, 'remote') : null
+  })
 }
 
 function buildCodexSnapshot(usageSession, sourceMode) {
