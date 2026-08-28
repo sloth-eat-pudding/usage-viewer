@@ -55,7 +55,7 @@ Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`�
 
 ## Claude Desktop 精確重置時間（可選）
 
-Usage Viewer 啟動時會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
+Usage Viewer 的 CMD overlay 與 EXE 都會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
 
 在 Claude Desktop 啟用 Developer Mode 後，於 DevTools Console 執行下列程式一次，將 `<org-id>` 換成 Network 中 usage request 的組織 ID：
 

@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -23,6 +25,8 @@ public sealed class UsageReaderService : IDisposable
     private readonly FileSystemWatcher? _codexWatcher;
     private Process? _activeClaudeProcess;
     private Process? _remoteSyncProcess;
+    private readonly HttpListener? _claudeDesktopUsageBridge;
+    private readonly CancellationTokenSource _bridgeCancellation = new();
     private volatile bool _disposed;
     private int _refreshRunning;
     private int _codexDirty = 1;
@@ -51,6 +55,7 @@ public sealed class UsageReaderService : IDisposable
         }
         _timer = new Timer(_ => Refresh(), null, TimeSpan.Zero, TimeSpan.FromSeconds(2));
         StartRemoteSync();
+        _claudeDesktopUsageBridge = StartClaudeDesktopUsageBridge();
     }
 
     private void Refresh()
@@ -84,6 +89,126 @@ public sealed class UsageReaderService : IDisposable
             });
         }
         catch (Exception error) { TraceClaude($"remote sync start failed={error.Message}"); }
+    }
+
+    // This is the native equivalent of claude-desktop-usage-bridge.js.  Keeping
+    // it in the EXE preserves the self-contained release path (no Node needed).
+    private HttpListener? StartClaudeDesktopUsageBridge()
+    {
+        try
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add("http://127.0.0.1:8765/");
+            listener.Start();
+            _ = Task.Run(() => ServeClaudeDesktopUsageBridge(listener, _bridgeCancellation.Token));
+            return listener;
+        }
+        catch (Exception error)
+        {
+            TraceClaude($"Claude Desktop usage bridge start failed={error.Message}");
+            return null;
+        }
+    }
+
+    private async Task ServeClaudeDesktopUsageBridge(HttpListener listener, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var context = await listener.GetContextAsync();
+                _ = Task.Run(() => HandleClaudeDesktopUsageBridgeRequest(context), cancellationToken);
+            }
+            catch (HttpListenerException) when (cancellationToken.IsCancellationRequested) { return; }
+            catch (ObjectDisposedException) { return; }
+            catch (Exception error) { TraceClaude($"Claude Desktop usage bridge request failed={error.Message}"); }
+        }
+    }
+
+    private async Task HandleClaudeDesktopUsageBridgeRequest(HttpListenerContext context)
+    {
+        var request = context.Request;
+        var response = context.Response;
+        try
+        {
+            var origin = request.Headers["Origin"] ?? "";
+            var allowedOrigin = origin is "https://claude.ai" or "https://www.claude.ai";
+            if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/health")
+            {
+                await WriteBridgeResponse(response, 200, "{\"status\":\"ok\"}");
+                return;
+            }
+            if (request.HttpMethod == "OPTIONS")
+            {
+                if (!allowedOrigin) { await WriteBridgeResponse(response, 403); return; }
+                AddCorsHeaders(response, origin);
+                response.StatusCode = 204;
+                response.Close();
+                return;
+            }
+            if (request.HttpMethod != "POST" || request.Url?.AbsolutePath != "/claude-desktop-usage" || !allowedOrigin)
+            {
+                await WriteBridgeResponse(response, request.HttpMethod == "POST" ? 403 : 404);
+                return;
+            }
+            var organizationId = request.QueryString["org"] ?? "";
+            if (!Regex.IsMatch(organizationId, "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", RegexOptions.IgnoreCase))
+            {
+                await WriteBridgeResponse(response, 400, "{\"error\":\"A valid org query parameter is required\"}", origin);
+                return;
+            }
+            if (request.ContentLength64 < 0 || request.ContentLength64 > 64 * 1024)
+            {
+                await WriteBridgeResponse(response, 413, "{\"error\":\"Payload too large\"}", origin);
+                return;
+            }
+            using var body = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8, false, 64 * 1024, leaveOpen: false);
+            var json = await body.ReadToEndAsync();
+            if (Encoding.UTF8.GetByteCount(json) > 64 * 1024) throw new InvalidDataException("Payload too large");
+            using var document = JsonDocument.Parse(json);
+            var fiveHour = ReadBridgeWindow(document.RootElement, "five_hour");
+            var sevenDay = ReadBridgeWindow(document.RootElement, "seven_day");
+            if (fiveHour.Used is null && sevenDay.Used is null) throw new InvalidDataException("Expected a Claude Desktop usage response");
+            var now = DateTimeOffset.UtcNow;
+            WriteJsonAtomic(Path.Combine(_home, $"claude-desktop-api-{organizationId}-latest.json"), new {
+                generated_at = now.ToString("O"), observed_at = now.ToString("O"), source = "claude-desktop-api-bridge", source_mode = "desktop", organization_id = organizationId,
+                percentages = new { five_hour_used = fiveHour.Used, seven_day_used = sevenDay.Used },
+                resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(fiveHour.Reset), seven_day_epoch_seconds = ToEpochSeconds(sevenDay.Reset) }
+            });
+            await WriteBridgeResponse(response, 204, null, origin);
+        }
+        catch (InvalidDataException error) { await WriteBridgeResponse(response, error.Message == "Payload too large" ? 413 : 400, $"{{\"error\":{JsonSerializer.Serialize(error.Message)}}}", request.Headers["Origin"]); }
+        catch (JsonException) { await WriteBridgeResponse(response, 400, "{\"error\":\"Expected a Claude Desktop usage response\"}", request.Headers["Origin"]); }
+        catch (Exception error) { TraceClaude($"Claude Desktop usage bridge handler failed={error.Message}"); await WriteBridgeResponse(response, 400, "{\"error\":\"Invalid request\"}", request.Headers["Origin"]); }
+    }
+
+    private static (double? Used, DateTimeOffset? Reset) ReadBridgeWindow(JsonElement root, string name)
+    {
+        var window = root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
+        var reset = StringOrNull(window, "resets_at");
+        return (NumberOrNull(window, "utilization"), DateTimeOffset.TryParse(reset, out var value) ? value : null);
+    }
+
+    private static void AddCorsHeaders(HttpListenerResponse response, string origin)
+    {
+        response.Headers["Access-Control-Allow-Origin"] = origin;
+        response.Headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+        response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+        response.Headers["Vary"] = "Origin";
+    }
+
+    private static async Task WriteBridgeResponse(HttpListenerResponse response, int statusCode, string? value = null, string? origin = null)
+    {
+        if (origin is "https://claude.ai" or "https://www.claude.ai") AddCorsHeaders(response, origin);
+        response.StatusCode = statusCode;
+        if (value is not null)
+        {
+            var bytes = Encoding.UTF8.GetBytes(value);
+            response.ContentType = "application/json";
+            response.ContentLength64 = bytes.Length;
+            await response.OutputStream.WriteAsync(bytes);
+        }
+        response.Close();
     }
 
     private void WriteCodex()
@@ -296,7 +421,10 @@ public sealed class UsageReaderService : IDisposable
     private void WriteClaude()
     {
         WriteConfiguredClaudeSource();
-        if (TryWriteClaudeUsageFromCommand()) return;
+        // A fresh Desktop API response is authoritative for its organization;
+        // do not let the CLI command's cached result defer applying it.
+        var hasFreshDesktopApi = ReadClaudePlanUsage() is { Organization: { } organization } && ReadClaudeDesktopApiUsage(organization) is not null;
+        if (!hasFreshDesktopApi && TryWriteClaudeUsageFromCommand()) return;
 
         var cliSource = Path.Combine(_home, "claude-statusline-latest.json");
         var desktopSource = _claudePlanUsageHistory;
@@ -312,6 +440,10 @@ public sealed class UsageReaderService : IDisposable
         }
         var selectedSource = useCli ? cliSource : desktopSource;
         var sourceWriteTime = useCli ? cliWriteTime : desktopWriteTime;
+        var desktopPlan = useCli ? null : ReadClaudePlanUsage();
+        var desktopApi = desktopPlan is null ? null : ReadClaudeDesktopApiUsage(desktopPlan.Organization);
+        if (desktopApi is not null && (sourceWriteTime is null || desktopApi.ObservedAt > sourceWriteTime.Value))
+            sourceWriteTime = desktopApi.ObservedAt;
         if (selectedSource is null || sourceWriteTime is null) return;
         if (_lastClaudeSelectedSource == selectedSource && _lastClaudeSelectedSourceWriteTimeUtc == sourceWriteTime) return;
 
@@ -332,16 +464,16 @@ public sealed class UsageReaderService : IDisposable
         }
         else
         {
-            var plan = ReadClaudePlanUsage();
+            var plan = desktopPlan;
             if (plan is null && _claudeCommandFiveHourUsed is null && _claudeCommandSevenDayUsed is null) return;
-            fiveHourUsed = plan?.FiveHourUsed ?? _claudeCommandFiveHourUsed;
-            sevenDayUsed = plan?.SevenDayUsed ?? _claudeCommandSevenDayUsed;
-            fiveHourReset = _claudeCommandFiveHourReset ?? plan?.EstimatedFiveHourReset;
-            sevenDayReset = _claudeCommandSevenDayReset ?? plan?.EstimatedSevenDayReset;
-            resetEstimated = _claudeCommandFiveHourReset is null && _claudeCommandSevenDayReset is null;
+            fiveHourUsed = desktopApi?.FiveHourUsed ?? plan?.FiveHourUsed ?? _claudeCommandFiveHourUsed;
+            sevenDayUsed = desktopApi?.SevenDayUsed ?? plan?.SevenDayUsed ?? _claudeCommandSevenDayUsed;
+            fiveHourReset = desktopApi?.FiveHourReset ?? _claudeCommandFiveHourReset ?? plan?.EstimatedFiveHourReset;
+            sevenDayReset = desktopApi?.SevenDayReset ?? _claudeCommandSevenDayReset ?? plan?.EstimatedSevenDayReset;
+            resetEstimated = desktopApi is null && _claudeCommandFiveHourReset is null && _claudeCommandSevenDayReset is null;
         }
 
-        WriteJson("claude-app-latest.json", new {
+        WriteJson("claude-desktop-latest.json", new {
             generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = sourceWriteTime.Value.ToString("O"),
             source = useCli ? "claude-code-statusline" : "claude-desktop-plan-usage-history",
             source_mode = useCli ? "cli" : "desktop",
@@ -605,16 +737,36 @@ public sealed class UsageReaderService : IDisposable
                 if (string.IsNullOrWhiteSpace(path)) continue;
                 var usage = ReadClaudePlanUsage(path);
                 if (usage is null) continue;
+                var desktopApi = ReadClaudeDesktopApiUsage(usage.Organization);
                 WriteJson($"claude-custom-{index}-latest.json", new {
                     generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = usage.ObservedAt.ToString("O"),
                     source = "claude-custom-plan-usage-history", source_mode = "desktop", source_file = path,
-                    percentages = new { context_used = (double?)null, five_hour_used = usage.FiveHourUsed, seven_day_used = usage.SevenDayUsed },
-                    resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(usage.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(usage.EstimatedSevenDayReset) },
-                    reset_is_estimated = new { five_hour = true, seven_day = true }
+                    percentages = new { context_used = (double?)null, five_hour_used = desktopApi?.FiveHourUsed ?? usage.FiveHourUsed, seven_day_used = desktopApi?.SevenDayUsed ?? usage.SevenDayUsed },
+                    resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(desktopApi?.FiveHourReset ?? usage.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(desktopApi?.SevenDayReset ?? usage.EstimatedSevenDayReset) },
+                    reset_is_estimated = new { five_hour = desktopApi?.FiveHourReset is null, seven_day = desktopApi?.SevenDayReset is null }
                 });
             }
         }
         catch { }
+    }
+
+    private ClaudeDesktopApiUsage? ReadClaudeDesktopApiUsage(string? organizationId)
+    {
+        if (string.IsNullOrWhiteSpace(organizationId)) return null;
+        try
+        {
+            var path = Path.Combine(_home, $"claude-desktop-api-{organizationId}-latest.json");
+            if (!File.Exists(path)) return null;
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            if (StringOrNull(root, "source") != "claude-desktop-api-bridge" || !string.Equals(StringOrNull(root, "organization_id"), organizationId, StringComparison.Ordinal)) return null;
+            var observedText = StringOrNull(root, "observed_at") ?? StringOrNull(root, "generated_at");
+            if (!DateTimeOffset.TryParse(observedText, out var observedAt) || DateTimeOffset.UtcNow - observedAt > TimeSpan.FromMinutes(5)) return null;
+            var percentages = root.TryGetProperty("percentages", out var p) ? p : default;
+            var resets = root.TryGetProperty("resets_at", out var r) ? r : default;
+            return new ClaudeDesktopApiUsage(observedAt, NumberOrNull(percentages, "five_hour_used"), NumberOrNull(percentages, "seven_day_used"), FutureEpoch(NumberOrNull(resets, "five_hour_epoch_seconds")), FutureEpoch(NumberOrNull(resets, "seven_day_epoch_seconds")));
+        }
+        catch { return null; }
     }
 
     private List<JsonElement> ReadConfiguredSources(string fileName)
@@ -740,6 +892,12 @@ public sealed class UsageReaderService : IDisposable
     {
         Directory.CreateDirectory(_home);
         var path = Path.Combine(_home, name);
+        WriteJsonAtomic(path, value);
+    }
+
+    private static void WriteJsonAtomic(string path, object value)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp-" + Environment.ProcessId;
         File.WriteAllText(temp, JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true }));
         File.Move(temp, path, true);
@@ -786,6 +944,7 @@ public sealed class UsageReaderService : IDisposable
     private readonly record struct ClaudePlanSample(DateTimeOffset Time, double? FiveHour, double? SevenDay, string? Organization);
     private sealed record ClaudePlanUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, string? Organization, DateTimeOffset? EstimatedFiveHourReset, DateTimeOffset? EstimatedSevenDayReset);
     private sealed record ClaudeStatuslineUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, DateTimeOffset? FiveHourReset, DateTimeOffset? SevenDayReset);
+    private sealed record ClaudeDesktopApiUsage(DateTimeOffset ObservedAt, double? FiveHourUsed, double? SevenDayUsed, DateTimeOffset? FiveHourReset, DateTimeOffset? SevenDayReset);
     public void Dispose()
     {
         lock (_claudeUsageCommandLock)
@@ -808,6 +967,13 @@ public sealed class UsageReaderService : IDisposable
             _remoteSyncProcess = null;
         }
         _timer.Dispose();
+        _bridgeCancellation.Cancel();
+        if (_claudeDesktopUsageBridge is not null)
+        {
+            try { _claudeDesktopUsageBridge.Stop(); } catch { }
+            _claudeDesktopUsageBridge.Close();
+        }
+        _bridgeCancellation.Dispose();
         if (_codexWatcher is not null)
         {
             _codexWatcher.EnableRaisingEvents = false;

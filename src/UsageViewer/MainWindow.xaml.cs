@@ -25,6 +25,12 @@ public partial class MainWindow : Window
     private const int WmNcHitTest = 0x0084;
     private const nint HtTransparent = -1;
     private const nint HtClient = 1;
+    private const int VkControl = 0x11;
+    private const int VkMenu = 0x12;
+    private const int VkP = 0x50;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
 
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -32,6 +38,7 @@ public partial class MainWindow : Window
     private DisplaySettings _displaySettings = DisplaySettings.Default;
     private HwndSource? _windowSource;
     private bool _isPinned;
+    private bool _pinHotkeyWasDown;
     private readonly bool _settingsOnly;
 
     public MainWindow()
@@ -59,6 +66,9 @@ public partial class MainWindow : Window
         Deactivated += (_, _) => Dispatcher.BeginInvoke(EnsureTopmost, DispatcherPriority.Background);
         _timer.Tick += (_, _) =>
         {
+            var pinHotkeyDown = IsKeyDown(VkControl) && IsKeyDown(VkMenu) && IsKeyDown(VkP);
+            if (pinHotkeyDown && !_pinHotkeyWasDown) OnPinClick(this, new RoutedEventArgs());
+            _pinHotkeyWasDown = pinHotkeyDown;
             Refresh();
             EnsureTopmost();
         };
@@ -275,6 +285,8 @@ public partial class MainWindow : Window
         CloseButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         EnsureTopmost();
     }
+
+    private static bool IsKeyDown(int virtualKey) => (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
     private nint WindowMessageHook(nint hwnd, int message, nint wParam, nint lParam, ref bool handled)
     {
