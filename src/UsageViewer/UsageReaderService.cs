@@ -11,7 +11,8 @@ namespace UsageViewer;
 public sealed class UsageReaderService : IDisposable
 {
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
-    private readonly string? _claudePlanUsageHistory = FindClaudePlanUsageHistory();
+    private readonly IReadOnlyList<string> _claudePlanUsageHistories = FindClaudePlanUsageHistories();
+    private readonly string? _claudePlanUsageHistory;
     private DateTimeOffset? _lastClaudeSelectedSourceWriteTimeUtc;
     private string? _lastClaudeSelectedSource;
     private DateTimeOffset? _lastClaudeUsageCommandTriggerUtc;
@@ -35,6 +36,7 @@ public sealed class UsageReaderService : IDisposable
 
     public UsageReaderService()
     {
+        _claudePlanUsageHistory = _claudePlanUsageHistories.FirstOrDefault();
         var codexRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "sessions");
         if (Directory.Exists(codexRoot))
         {
@@ -186,7 +188,7 @@ public sealed class UsageReaderService : IDisposable
     {
         var window = root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Object ? value : default;
         var reset = StringOrNull(window, "resets_at");
-        return (NumberOrNull(window, "utilization"), DateTimeOffset.TryParse(reset, out var value) ? value : null);
+        return (NumberOrNull(window, "utilization"), DateTimeOffset.TryParse(reset, out var parsedReset) ? parsedReset : null);
     }
 
     private static void AddCorsHeaders(HttpListenerResponse response, string origin)
@@ -421,6 +423,7 @@ public sealed class UsageReaderService : IDisposable
     private void WriteClaude()
     {
         WriteConfiguredClaudeSource();
+        WriteClaudeDesktopSnapshots();
         // A fresh Desktop API response is authoritative for its organization;
         // do not let the CLI command's cached result defer applying it.
         var hasFreshDesktopApi = ReadClaudePlanUsage() is { Organization: { } organization } && ReadClaudeDesktopApiUsage(organization) is not null;
@@ -495,6 +498,28 @@ public sealed class UsageReaderService : IDisposable
 
         _lastClaudeSelectedSource = selectedSource;
         _lastClaudeSelectedSourceWriteTimeUtc = sourceWriteTime;
+    }
+
+    private void WriteClaudeDesktopSnapshots()
+    {
+        for (var index = 0; index < _claudePlanUsageHistories.Count; index++)
+        {
+            var sourcePath = _claudePlanUsageHistories[index];
+            var sourceWriteTime = TryGetWriteTimeUtc(sourcePath);
+            var plan = ReadClaudePlanUsage(sourcePath);
+            if (plan is null || sourceWriteTime is null) continue;
+
+            var desktopApi = ReadClaudeDesktopApiUsage(plan.Organization);
+            var observedAt = sourceWriteTime.Value;
+            if (desktopApi is not null && desktopApi.ObservedAt > observedAt) observedAt = desktopApi.ObservedAt;
+            WriteJson($"claude-desktop-{index}-latest.json", new {
+                generated_at = DateTimeOffset.UtcNow.ToString("O"), observed_at = observedAt.ToString("O"),
+                source = "claude-desktop-plan-usage-history", source_mode = "desktop", source_file = sourcePath,
+                percentages = new { context_used = (double?)null, five_hour_used = desktopApi?.FiveHourUsed ?? plan.FiveHourUsed, seven_day_used = desktopApi?.SevenDayUsed ?? plan.SevenDayUsed },
+                resets_at = new { five_hour_epoch_seconds = ToEpochSeconds(desktopApi?.FiveHourReset ?? plan.EstimatedFiveHourReset), seven_day_epoch_seconds = ToEpochSeconds(desktopApi?.SevenDayReset ?? plan.EstimatedSevenDayReset) },
+                reset_is_estimated = new { five_hour = desktopApi is null && plan.EstimatedFiveHourReset is not null, seven_day = desktopApi is null && plan.EstimatedSevenDayReset is not null }
+            });
+        }
     }
 
     private bool TryWriteClaudeUsageFromCommand()
@@ -862,14 +887,14 @@ public sealed class UsageReaderService : IDisposable
     private static DateTimeOffset? FutureOnly(DateTimeOffset value) => value > DateTimeOffset.UtcNow ? value : null;
     private static long? ToEpochSeconds(DateTimeOffset? value) => value?.ToUnixTimeSeconds();
 
-    private static string? FindClaudePlanUsageHistory()
+    private static IReadOnlyList<string> FindClaudePlanUsageHistories()
     {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var candidates = new List<string>
-        {
-            Path.Combine(localAppData, "Packages", "Claude_*", "LocalCache", "Roaming", "Claude", "plan-usage-history.json")
-        };
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var regularInstallPath = Path.Combine(appData, "Claude", "plan-usage-history.json");
+        var candidates = new List<string>();
+        if (File.Exists(regularInstallPath)) candidates.Add(regularInstallPath);
 
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         try
         {
             var packages = Path.Combine(localAppData, "Packages");
@@ -884,8 +909,9 @@ public sealed class UsageReaderService : IDisposable
 
         return candidates.Where(File.Exists)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
+            .OrderBy(path => path.Equals(regularInstallPath, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenByDescending(File.GetLastWriteTimeUtc)
+            .ToList();
     }
 
     private void WriteJson(string name, object value)

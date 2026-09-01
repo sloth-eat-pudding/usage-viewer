@@ -11,18 +11,10 @@ const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
 
 const PROJECTS_DIRECTORY = path.join(CLAUDE_HOME, 'projects')
-const CLAUDE_DESKTOP_DATA_DIRECTORY = process.env.CLAUDE_DESKTOP_DATA_DIRECTORY ||
-  path.join(
-    process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
-    'Packages',
-    'Claude_pzs8sxrjxfjjc',
-    'LocalCache',
-    'Roaming',
-    'Claude'
-  )
-const PLAN_USAGE_HISTORY_FILE = path.join(
-  CLAUDE_DESKTOP_DATA_DIRECTORY,
-  'plan-usage-history.json'
+const CLAUDE_DESKTOP_DATA_DIRECTORY = process.env.CLAUDE_DESKTOP_DATA_DIRECTORY || null
+const PLAN_USAGE_HISTORY_FILES = findPlanUsageHistoryFiles()
+const PLAN_USAGE_HISTORY_FILE = PLAN_USAGE_HISTORY_FILES[0] || path.join(
+  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude', 'plan-usage-history.json'
 )
 const LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'latest.json')
 const CLAUDE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-latest.json')
@@ -31,20 +23,43 @@ const CLAUDE_STATUSLINE_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'claude-statu
 const HISTORY_FILE = path.join(USAGE_VIEWER_HOME, 'history.jsonl')
 const DESKTOP_API_SNAPSHOT_MAX_AGE_MS = 5 * 60 * 1000
 
+function findPlanUsageHistoryFiles() {
+  if (CLAUDE_DESKTOP_DATA_DIRECTORY) {
+    const override = path.join(CLAUDE_DESKTOP_DATA_DIRECTORY, 'plan-usage-history.json')
+    return fs.existsSync(override) ? [override] : []
+  }
+  const regularFiles = []
+  const appDataFile = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude', 'plan-usage-history.json')
+  if (fs.existsSync(appDataFile)) regularFiles.push(appDataFile)
+  const packageFiles = []
+  const packages = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Packages')
+  try {
+    for (const entry of fs.readdirSync(packages, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^Claude_/i.test(entry.name)) continue
+      const file = path.join(packages, entry.name, 'LocalCache', 'Roaming', 'Claude', 'plan-usage-history.json')
+      if (fs.existsSync(file)) packageFiles.push(file)
+    }
+  } catch {}
+  return regularFiles.concat(packageFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs))
+}
+
 try {
-  const snapshot = readClaudeDesktopUsage()
+  const snapshot = readClaudeDesktopUsage(PLAN_USAGE_HISTORY_FILE)
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   writeJsonAtomic(CLAUDE_DESKTOP_LATEST_FILE, snapshot)
   writeJsonAtomic(CLAUDE_LATEST_FILE, snapshot)
   writeJsonAtomic(LATEST_FILE, snapshot)
   fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
+  for (let index = 0; index < PLAN_USAGE_HISTORY_FILES.length; index += 1) {
+    writeJsonAtomic(path.join(USAGE_VIEWER_HOME, `claude-desktop-${index}-latest.json`), readClaudeDesktopUsage(PLAN_USAGE_HISTORY_FILES[index]))
+  }
   process.stdout.write(formatSummary(snapshot))
 } catch (error) {
   process.stderr.write(`claude desktop usage read error: ${error.message}\n`)
   process.exitCode = 1
 }
 
-function readClaudeDesktopUsage() {
+function readClaudeDesktopUsage(planUsageFile) {
   const latest = findLatestUsage(PROJECTS_DIRECTORY)
 
   if (!latest) {
@@ -54,10 +69,10 @@ function readClaudeDesktopUsage() {
   const entry = latest.entry
   const sourceFileMtime = new Date(latest.mtimeMs).toISOString()
   const message = entry.message || {}
-  const planUsage = readLatestPlanUsage()
+  const planUsage = readLatestPlanUsage(planUsageFile)
   const desktopApiUsage = readLatestDesktopApiUsage(planUsage ? planUsage.org : null)
   const statusLineResets = readLatestStatusLineResets()
-  const estimatedResets = estimatePlanUsageResets()
+  const estimatedResets = estimatePlanUsageResets(planUsageFile)
   const fiveHourReset = firstFutureEpochSeconds([
     desktopApiUsage.resets_at.five_hour_epoch_seconds,
     statusLineResets.five_hour_epoch_seconds,
@@ -105,7 +120,7 @@ function readClaudeDesktopUsage() {
     },
     reset_source: desktopApiUsage.observed_at ? 'claude-desktop-api-bridge' : estimatedResets.source,
     plan_usage: {
-      source_file: planUsage ? PLAN_USAGE_HISTORY_FILE : null,
+      source_file: planUsage ? planUsageFile : null,
       observed_at: planUsage ? new Date(planUsage.timestamp).toISOString() : null,
       org: planUsage ? nullableString(planUsage.org) : null
     },
@@ -204,13 +219,13 @@ function readLatestStatusLineResets() {
   return empty
 }
 
-function readLatestPlanUsage() {
-  if (!fs.existsSync(PLAN_USAGE_HISTORY_FILE)) {
+function readLatestPlanUsage(planUsageFile = PLAN_USAGE_HISTORY_FILE) {
+  if (!fs.existsSync(planUsageFile)) {
     return null
   }
 
   try {
-    const data = JSON.parse(fs.readFileSync(PLAN_USAGE_HISTORY_FILE, 'utf8'))
+    const data = JSON.parse(fs.readFileSync(planUsageFile, 'utf8'))
     const samples = Array.isArray(data.samples) ? data.samples : []
     const latest = samples
       .filter(sample => sample && sample.u && Number.isFinite(Number(sample.t)))
@@ -230,19 +245,19 @@ function readLatestPlanUsage() {
   }
 }
 
-function estimatePlanUsageResets() {
+function estimatePlanUsageResets(planUsageFile = PLAN_USAGE_HISTORY_FILE) {
   const empty = {
     five_hour_epoch_seconds: null,
     seven_day_epoch_seconds: null,
     source: null
   }
 
-  if (!fs.existsSync(PLAN_USAGE_HISTORY_FILE)) {
+  if (!fs.existsSync(planUsageFile)) {
     return empty
   }
 
   try {
-    const data = JSON.parse(fs.readFileSync(PLAN_USAGE_HISTORY_FILE, 'utf8'))
+    const data = JSON.parse(fs.readFileSync(planUsageFile, 'utf8'))
     const samples = (Array.isArray(data.samples) ? data.samples : [])
       .filter(sample => sample && sample.u && Number.isFinite(Number(sample.t)))
       .map(sample => ({

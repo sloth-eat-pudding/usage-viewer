@@ -87,13 +87,31 @@ public partial class MainWindow : Window
         DetailText.Text = string.Join("\n", details);
     }
 
-    private List<UsageSource> ClaudeSources() => new[]
-    {
-        new UsageSource("D", _displaySettings.ClaudeDesktopGroup, Read("claude-desktop-latest.json")),
-        new UsageSource("C", _displaySettings.ClaudeCliGroup, Read("claude-statusline-latest.json"))
-    }.Concat(_displaySettings.ClaudeCustomSources.Select((source, index) =>
+    private List<UsageSource> ClaudeSources() => ClaudeDesktopSources().Select((source, index) =>
+        new UsageSource(source.Name, source.Group, Read($"claude-desktop-{index}-latest.json")))
+        .Concat(new[] { new UsageSource("C", _displaySettings.ClaudeCliGroup, Read("claude-statusline-latest.json")) })
+        .Concat(_displaySettings.ClaudeCustomSources.Select((source, index) =>
             new UsageSource(string.IsNullOrWhiteSpace(source.Name) ? $"Custom {index + 1}" : source.Name,
                 source.Group, Read($"claude-custom-{index}-latest.json")))).ToList();
+
+    private static IReadOnlyList<ConfiguredSource> ClaudeDesktopSources()
+    {
+        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        var regular = Path.Combine(appData, "Claude", "plan-usage-history.json");
+        var result = new List<ConfiguredSource>();
+        if (File.Exists(regular)) result.Add(new ConfiguredSource("Claude Desktop (AppData)", regular, "1"));
+        try
+        {
+            var packages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Packages");
+            if (Directory.Exists(packages))
+                result.AddRange(Directory.EnumerateDirectories(packages, "Claude_*")
+                    .Select(path => Path.Combine(path, "LocalCache", "Roaming", "Claude", "plan-usage-history.json"))
+                    .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc)
+                    .Select((path, index) => new ConfiguredSource($"Claude Desktop (MSIX {index + 1})", path, (index + 2).ToString(CultureInfo.InvariantCulture))));
+        }
+        catch { }
+        return result;
+    }
 
     private List<UsageSource> CodexSources() => new[]
     {
@@ -399,7 +417,15 @@ public partial class MainWindow : Window
         var content = new StackPanel(); var scroll = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         var groupCodes = BuildGroupCodes(_displaySettings);
         AddSettingsSection(content, "Built-in sources");
-        var claudeDesktop = AddGroupSelector(content, "Claude Desktop", _displaySettings.ClaudeDesktopGroup, groupCodes);
+        var detectedDesktop = ClaudeDesktopSources();
+        var configuredDesktop = detectedDesktop.Select((source, index) =>
+        {
+            var saved = _displaySettings.ClaudeDesktopSources.FirstOrDefault(item => item.Path.Equals(source.Path, StringComparison.OrdinalIgnoreCase));
+            var fallbackGroup = index == 0 ? _displaySettings.ClaudeDesktopGroup : (index + 1).ToString(CultureInfo.InvariantCulture);
+            return new ConfiguredSource(source.Name, source.Path, saved?.Group ?? fallbackGroup);
+        }).ToList();
+        if (configuredDesktop.Count == 0) configuredDesktop.Add(new ConfiguredSource("Claude Desktop", "", _displaySettings.ClaudeDesktopGroup));
+        var claudeDesktopSelectors = configuredDesktop.Select(source => AddGroupSelector(content, source.Name, source.Group, groupCodes)).ToList();
         var claudeCli = AddGroupSelector(content, "Claude CLI", _displaySettings.ClaudeCliGroup, groupCodes);
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", _displaySettings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", _displaySettings.CodexCliGroup, groupCodes);
@@ -432,7 +458,7 @@ public partial class MainWindow : Window
         openEnvironment.Click += (_, _) => OpenClaudeEnvironment(selectedEnvironment, _displaySettings.ClaudeCustomSources);
         environmentSelector.SelectionChanged += (_, _) => selectedEnvironment = environmentSelector.SelectedItem as string ?? "default";
         var environmentRow = new StackPanel { Orientation = Orientation.Horizontal }; environmentRow.Children.Add(environmentSelector); environmentRow.Children.Add(openEnvironment); content.Children.Add(environmentRow);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { _displaySettings = new DisplaySettings(SelectedGroup(claudeDesktop), SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment); SaveDisplaySettings(); Refresh(); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { IReadOnlyList<ConfiguredSource> desktopSources = detectedDesktop.Count == 0 ? new List<ConfiguredSource>() : configuredDesktop.Select((source, index) => source with { Group = SelectedGroup(claudeDesktopSelectors[index]) }).ToList(); _displaySettings = new DisplaySettings(desktopSources, SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment); SaveDisplaySettings(); Refresh(); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
     }
 
     private static void AddSettingsSection(Panel panel, string title)
@@ -637,7 +663,8 @@ public partial class MainWindow : Window
 #endif
     private static ObservableCollection<string> BuildGroupCodes(DisplaySettings settings)
     {
-        var groups = new[] { settings.ClaudeDesktopGroup, settings.ClaudeCliGroup, settings.CodexDesktopGroup, settings.CodexCliGroup }
+        var groups = settings.ClaudeDesktopSources.Select(source => source.Group)
+            .Append(settings.ClaudeCliGroup).Append(settings.CodexDesktopGroup).Append(settings.CodexCliGroup)
             .Concat(settings.ClaudeCustomSources.Select(source => source.Group))
             .Concat(settings.CodexSshSources.Select(source => source.Group));
         var maximum = groups.Select(GroupNumber).DefaultIfEmpty(0).Max();
@@ -713,16 +740,17 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("key_path")] string KeyPath = "",
         [property: JsonPropertyName("sessions_path")] string SessionsPath = "~/.codex/sessions",
         [property: JsonPropertyName("profile_path")] string ProfilePath = "");
-    private sealed record DisplaySettings(string ClaudeDesktopGroup, string ClaudeCliGroup, IReadOnlyList<ConfiguredSource> ClaudeCustomSources, string CodexDesktopGroup, string CodexCliGroup, IReadOnlyList<ConfiguredSource> CodexSshSources, string ClaudeUserEnvironment)
+    private sealed record DisplaySettings(IReadOnlyList<ConfiguredSource> ClaudeDesktopSources, string ClaudeCliGroup, IReadOnlyList<ConfiguredSource> ClaudeCustomSources, string CodexDesktopGroup, string CodexCliGroup, IReadOnlyList<ConfiguredSource> CodexSshSources, string ClaudeUserEnvironment)
     {
+        public string ClaudeDesktopGroup => ClaudeDesktopSources.FirstOrDefault()?.Group ?? "1";
         public string ClaudeCustomPath => ClaudeCustomSources.FirstOrDefault()?.Path ?? "";
         public string ClaudeCustomGroup => ClaudeCustomSources.FirstOrDefault()?.Group ?? "1";
         public string CodexSshGroup => CodexSshSources.FirstOrDefault()?.Group ?? "2";
-        public static DisplaySettings Default { get; } = new("1", "1", Array.Empty<ConfiguredSource>(), "1", "1", Array.Empty<ConfiguredSource>(), "default");
+        public static DisplaySettings Default { get; } = new(Array.Empty<ConfiguredSource>(), "1", Array.Empty<ConfiguredSource>(), "1", "1", Array.Empty<ConfiguredSource>(), "default");
         public static DisplaySettings FromJson(JsonElement root) => new(
-            Group(root, "claude_desktop_group", "1"), Group(root, "claude_cli_group", "1"), Sources(root, "claude_custom_sources", "claude_custom_path", "claude_custom_group", "Custom"),
+            Sources(root, "claude_desktop_sources", null, "claude_desktop_group", "Desktop"), Group(root, "claude_cli_group", "1"), Sources(root, "claude_custom_sources", "claude_custom_path", "claude_custom_group", "Custom"),
             Group(root, "codex_desktop_group", "1"), Group(root, "codex_cli_group", "1"), Sources(root, "codex_ssh_sources", null, "codex_ssh_group", "SSH"), Environment(root));
-        public object ToStorage() => new { claude_desktop_group = ClaudeDesktopGroup, claude_cli_group = ClaudeCliGroup, claude_custom_sources = ClaudeCustomSources, codex_desktop_group = CodexDesktopGroup, codex_cli_group = CodexCliGroup, codex_ssh_sources = CodexSshSources, claude_user_environment = ClaudeUserEnvironment };
+        public object ToStorage() => new { claude_desktop_group = ClaudeDesktopGroup, claude_desktop_sources = ClaudeDesktopSources, claude_cli_group = ClaudeCliGroup, claude_custom_sources = ClaudeCustomSources, codex_desktop_group = CodexDesktopGroup, codex_cli_group = CodexCliGroup, codex_ssh_sources = CodexSshSources, claude_user_environment = ClaudeUserEnvironment };
         private static string String(JsonElement root, string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
         private static string Group(JsonElement root, string name, string fallback) { var value = String(root, name); return string.IsNullOrWhiteSpace(value) ? fallback : NormalizeGroup(value); }
         private static IReadOnlyList<ConfiguredSource> Sources(JsonElement root, string arrayName, string? legacyPathName, string legacyGroupName, string defaultName)
