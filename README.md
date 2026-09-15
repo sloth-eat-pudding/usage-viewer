@@ -57,7 +57,9 @@ Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`�
 
 Usage Viewer 的 CMD overlay 與 EXE 都會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
 
-在 Claude Desktop 啟用 Developer Mode 後，於 DevTools Console 執行下列程式一次，將 `<org-id>` 換成 Network 中 usage request 的組織 ID：
+在 Claude Desktop 啟用 Developer Mode 後，先執行一次 `scripts\configure-claude-desktop-auto-bridge.ps1`。它會設定 Claude 官方支援的 `CLAUDE_DEV_TOOLS=undocked` 使用者環境變數，讓下一次 Claude 啟動時自動開啟 DevTools。Usage Viewer 會從本機 `plan-usage-history.json` 找出 organization ID，等待鍵鼠閒置後以 Unicode 鍵盤輸入下列等效同步程式，再關閉 DevTools 並恢復原本的前景視窗。Claude 之後每次重啟都會自動再次注入；目前已在執行的 Claude 不會被強制關閉。
+
+正式版 Claude 會拒絕一般的 remote-debugging/CDP 參數，因此這個流程使用 Claude 自己的 Developer Mode；不會修改 Claude 安裝檔、讀取程序記憶體、Cookie 或 Authorization header。執行 `scripts\configure-claude-desktop-auto-bridge.ps1 -Disable` 可還原由本專案建立的環境設定；`CLAUDE_DESKTOP_AUTO_BRIDGE=0` 可只停用 injector。手動診斷時仍可於 DevTools Console 執行：
 
 ```js
 const orgIds = ['<first-org-id>', '<second-org-id>']
@@ -76,6 +78,8 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 ```
 
 收到 bridge snapshot 後，Claude Desktop reader 會在五分鐘內優先採用其中精確的重置時間；超時後自動回退到本機 usage history 的推估值。
+
+腳本版的啟動與重新啟動入口都會執行 `scripts\watch-claude-desktop-usage-bridge.ps1`，每 15 秒檢查本機 bridge，未啟動或停止回應時自動恢復。啟動紀錄與標準錯誤保存在 `%USERPROFILE%\.usage-viewer\claude-desktop-usage-bridge-watch.log` 與 `claude-desktop-usage-bridge.stderr.log`。
 
 ## 遠端 Codex 同步（可選）
 

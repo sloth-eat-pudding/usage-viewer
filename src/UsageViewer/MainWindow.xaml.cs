@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -88,10 +89,10 @@ public partial class MainWindow : Window
     }
 
     private List<UsageSource> ClaudeSources() => ClaudeDesktopSources().Select((source, index) =>
-        new UsageSource(source.Name, source.Group, Read($"claude-desktop-{index}-latest.json")))
+        new UsageSource(AbbreviateSourceLabel(source.Name, "Claude"), source.Group, Read($"claude-desktop-{index}-latest.json")))
         .Concat(new[] { new UsageSource("C", _displaySettings.ClaudeCliGroup, Read("claude-statusline-latest.json")) })
         .Concat(_displaySettings.ClaudeCustomSources.Select((source, index) =>
-            new UsageSource(string.IsNullOrWhiteSpace(source.Name) ? $"Custom {index + 1}" : source.Name,
+            new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"Custom {index + 1}" : source.Name, "Claude"),
                 source.Group, Read($"claude-custom-{index}-latest.json")))).ToList();
 
     private static IReadOnlyList<ConfiguredSource> ClaudeDesktopSources()
@@ -118,8 +119,19 @@ public partial class MainWindow : Window
         new UsageSource("D", _displaySettings.CodexDesktopGroup, Read("codex-desktop-latest.json")),
         new UsageSource("C", _displaySettings.CodexCliGroup, Read("codex-cli-latest.json"))
     }.Concat(_displaySettings.CodexSshSources.Select((source, index) =>
-            new UsageSource(string.IsNullOrWhiteSpace(source.Name) ? $"SSH {index + 1}" : source.Name,
+            new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"SSH {index + 1}" : source.Name, "Codex"),
                 source.Group, ReadRemoteSnapshot(index)))).ToList();
+
+    private static string AbbreviateSourceLabel(string label, string product)
+    {
+        var words = Regex.Matches(label, @"[\p{L}\p{N}]+")
+            .Select(match => match.Value)
+            .Where(word => !word.All(char.IsDigit))
+            .ToList();
+        if (words.Count > 1 && words[0].Equals(product, StringComparison.OrdinalIgnoreCase)) words.RemoveAt(0);
+        var abbreviation = string.Concat(words.Select(word => char.ToUpperInvariant(word[0])));
+        return string.IsNullOrWhiteSpace(abbreviation) ? "?" : abbreviation;
+    }
 
     private JsonElement? ReadRemoteSnapshot(int index)
     {
@@ -156,6 +168,12 @@ public partial class MainWindow : Window
     {
         if (root is not null)
         {
+            if (root.Value.TryGetProperty("desktop_api", out var desktopApi) &&
+                desktopApi.ValueKind == JsonValueKind.Object &&
+                desktopApi.TryGetProperty("observed_at", out var apiObserved) &&
+                apiObserved.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(apiObserved.GetString(), out var apiTimestamp))
+                return apiTimestamp;
             foreach (var name in new[] { "observed_at", "generated_at" })
                 if (root.Value.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(value.GetString(), out var timestamp))
                     return timestamp;
@@ -201,8 +219,8 @@ public partial class MainWindow : Window
         var parts = new List<string>();
         var sevenDay = Reset(root.Value, "seven_day_epoch_seconds", "7d", relative: false);
         var fiveHour = Reset(root.Value, "five_hour_epoch_seconds", "5h", relative: false);
-        if (!string.IsNullOrWhiteSpace(sevenDay)) parts.Add(sevenDay);
-        if (!string.IsNullOrWhiteSpace(fiveHour)) parts.Add(fiveHour);
+        parts.Add(string.IsNullOrWhiteSpace(sevenDay) ? "?" : sevenDay);
+        parts.Add(string.IsNullOrWhiteSpace(fiveHour) ? "?" : fiveHour);
         var age = Age(root);
         if (!string.IsNullOrWhiteSpace(age)) parts.Add(age);
         return string.Join(" | ", parts);
@@ -254,7 +272,13 @@ public partial class MainWindow : Window
     {
         if (root is null) return "";
         string? timestamp = null;
-        if (root.Value.TryGetProperty("observed_at", out var observed) && observed.ValueKind == JsonValueKind.String) timestamp = observed.GetString();
+        if (root.Value.TryGetProperty("desktop_api", out var desktopApi) &&
+            desktopApi.ValueKind == JsonValueKind.Object &&
+            desktopApi.TryGetProperty("observed_at", out var apiObserved) &&
+            apiObserved.ValueKind == JsonValueKind.String)
+            timestamp = apiObserved.GetString();
+        if (timestamp is null && root.Value.TryGetProperty("observed_at", out var observed) && observed.ValueKind == JsonValueKind.String)
+            timestamp = observed.GetString();
         if (DateTimeOffset.TryParse(timestamp, out var time))
         {
             var age = DateTimeOffset.Now - time;

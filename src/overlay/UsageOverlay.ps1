@@ -177,6 +177,20 @@ function Convert-GroupCode {
   if ([int]::TryParse($code, [ref]$number) -and $number -gt 0) { return [string]$number }
   return "1"
 }
+function ConvertTo-SourceAbbreviation {
+  param(
+    [string]$Label,
+    [string]$Product
+  )
+
+  $words = @([regex]::Matches([string]$Label, '[\p{L}\p{N}]+') |
+    ForEach-Object { $_.Value } |
+    Where-Object { $_ -notmatch '^\d+$' })
+  if ($words.Count -gt 1 -and [string]$words[0] -ieq $Product) { $words = @($words | Select-Object -Skip 1) }
+  $abbreviation = -join @($words | ForEach-Object { ([string]$_).Substring(0, 1).ToUpperInvariant() })
+  if ([string]::IsNullOrWhiteSpace($abbreviation)) { return "?" }
+  return $abbreviation
+}
 function Get-ClaudeDesktopSources {
   $result = @()
   $regular = Join-Path $env:APPDATA "Claude\plan-usage-history.json"
@@ -626,9 +640,14 @@ function Read-ClaudePlanUsageJson {
       }
     }
     [pscustomobject]@{
+      observed_at = if ($apiUsage) {
+        if ($apiUsage.observed_at) { [string]$apiUsage.observed_at } else { [string]$apiUsage.generated_at }
+      } else {
+        [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$sample.t).ToString('O')
+      }
       percentages = [pscustomobject]@{
-        five_hour_used = if ($apiUsage -and $null -ne $apiUsage.percentages.five_hour_used) { [double]$apiUsage.percentages.five_hour_used } else { [double]$sample.u.fh }
-        seven_day_used = if ($apiUsage -and $null -ne $apiUsage.percentages.seven_day_used) { [double]$apiUsage.percentages.seven_day_used } else { [double]$sample.u.sd }
+        five_hour_used = if ($apiUsage) { $apiUsage.percentages.five_hour_used } else { $null }
+        seven_day_used = if ($apiUsage) { $apiUsage.percentages.seven_day_used } else { $null }
       }
       resets_at = [pscustomobject]@{
         five_hour_epoch_seconds = if ($apiUsage) { $apiUsage.resets_at.five_hour_epoch_seconds } else { $null }
@@ -658,13 +677,13 @@ function Update-CombinedUsageView {
     for ($desktopIndex = 0; $desktopIndex -lt $script:ClaudeDesktopSources.Count; $desktopIndex++) {
       $desktop = $script:ClaudeDesktopSources[$desktopIndex]
       $desktopGroup = Convert-GroupCode ([string]$desktop.group)
-      if ($desktopGroup -ne "Hidden") { $claudeSources += @{ Label = [string]$desktop.name; Group = $desktopGroup; Data = (Read-UsageJson (Join-Path $usageHome "claude-desktop-$desktopIndex-latest.json")) } }
+      if ($desktopGroup -ne "Hidden") { $claudeSources += @{ Label = ConvertTo-SourceAbbreviation ([string]$desktop.name) "Claude"; Group = $desktopGroup; Data = (Read-UsageJson (Join-Path $usageHome "claude-desktop-$desktopIndex-latest.json")) } }
     }
   }
   if ($script:ClaudeCliGroup -ne "Hidden") { $claudeSources += @{ Label = "C"; Group = $script:ClaudeCliGroup; Data = (Read-UsageJson $claudeCliUsageFile) } }
   foreach ($custom in $script:ClaudeCustomSources) {
     $customGroup = Convert-GroupCode $(if ($custom.group) { [string]$custom.group } else { "1" })
-    if ($custom.path -and $customGroup -ne "Hidden") { $claudeSources += @{ Label = if ($custom.name) { [string]$custom.name } else { "Custom" }; Group = $customGroup; Data = (Read-ClaudePlanUsageJson ([string]$custom.path)) } }
+    if ($custom.path -and $customGroup -ne "Hidden") { $claudeSources += @{ Label = ConvertTo-SourceAbbreviation $(if ($custom.name) { [string]$custom.name } else { "Custom" }) "Claude"; Group = $customGroup; Data = (Read-ClaudePlanUsageJson ([string]$custom.path)) } }
   }
   $claudeSources = @($claudeSources | Where-Object { $null -ne $_.Data })
 
@@ -684,7 +703,7 @@ function Update-CombinedUsageView {
       if ($sshIndex -eq 0 -and -not (Test-Path -LiteralPath $sshFile)) {
         $sshFile = $codexRemoteUsageFile
       }
-      if ($sshGroup -ne "Hidden") { $codexSources += @{ Label = if ($ssh.name) { [string]$ssh.name } else { "SSH $($sshIndex + 1)" }; Group = $sshGroup; Data = (Read-UsageJson $sshFile) } }
+      if ($sshGroup -ne "Hidden") { $codexSources += @{ Label = ConvertTo-SourceAbbreviation $(if ($ssh.name) { [string]$ssh.name } else { "SSH $($sshIndex + 1)" }) "Codex"; Group = $sshGroup; Data = (Read-UsageJson $sshFile) } }
     }
   }
   $codexSources = @($codexSources | Where-Object { $null -ne $_.Data })
@@ -1009,6 +1028,10 @@ function Format-Age {
 function Get-UsageTimestamp {
   param($Json)
 
+  if ($Json.desktop_api -and $Json.desktop_api.observed_at) {
+    return $Json.desktop_api.observed_at
+  }
+
   if ($Json.observed_at) {
     return $Json.observed_at
   }
@@ -1053,11 +1076,7 @@ function Format-ResetSummary {
 
   $fiveHour = Format-ResetTime (Get-ResetEpochByName $Json "five_hour")
   $week = Format-ResetWeekdayTime (Get-ResetEpochByName $Json "seven_day")
-  $parts = @()
-  if ($week -ne "?") { $parts += $week }
-  if ($fiveHour -ne "?") { $parts += $fiveHour }
-  if ($parts.Count -gt 0) { return $parts -join " | " }
-  return "?"
+  return "$week | $fiveHour"
 }
 
 function Show-SshSourceDialog {

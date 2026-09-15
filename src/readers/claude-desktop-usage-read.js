@@ -71,18 +71,8 @@ function readClaudeDesktopUsage(planUsageFile) {
   const message = entry.message || {}
   const planUsage = readLatestPlanUsage(planUsageFile)
   const desktopApiUsage = readLatestDesktopApiUsage(planUsage ? planUsage.org : null)
-  const statusLineResets = readLatestStatusLineResets()
-  const estimatedResets = estimatePlanUsageResets(planUsageFile)
-  const fiveHourReset = firstFutureEpochSeconds([
-    desktopApiUsage.resets_at.five_hour_epoch_seconds,
-    statusLineResets.five_hour_epoch_seconds,
-    estimatedResets.five_hour_epoch_seconds
-  ])
-  const sevenDayReset = firstFutureEpochSeconds([
-    desktopApiUsage.resets_at.seven_day_epoch_seconds,
-    statusLineResets.seven_day_epoch_seconds,
-    estimatedResets.seven_day_epoch_seconds
-  ])
+  const fiveHourReset = desktopApiUsage.resets_at.five_hour_epoch_seconds
+  const sevenDayReset = desktopApiUsage.resets_at.seven_day_epoch_seconds
 
   return {
     generated_at: new Date().toISOString(),
@@ -106,19 +96,14 @@ function readClaudeDesktopUsage(planUsageFile) {
     percentages: {
       context_used: null,
       context_remaining: null,
-      five_hour_used: desktopApiUsage.percentages.five_hour_used ?? (planUsage ? nullableNumber(planUsage.usage.fh) : null),
-      seven_day_used: desktopApiUsage.percentages.seven_day_used ?? (planUsage ? nullableNumber(planUsage.usage.sd) : null)
+      five_hour_used: desktopApiUsage.percentages.five_hour_used,
+      seven_day_used: desktopApiUsage.percentages.seven_day_used
     },
     resets_at: {
       five_hour_epoch_seconds: fiveHourReset,
       seven_day_epoch_seconds: sevenDayReset
     },
-    estimated_resets_at: {
-      five_hour_epoch_seconds: estimatedResets.five_hour_epoch_seconds,
-      seven_day_epoch_seconds: estimatedResets.seven_day_epoch_seconds,
-      source: estimatedResets.source
-    },
-    reset_source: desktopApiUsage.observed_at ? 'claude-desktop-api-bridge' : estimatedResets.source,
+    reset_source: desktopApiUsage.observed_at ? 'claude-desktop-api-bridge' : null,
     plan_usage: {
       source_file: planUsage ? planUsageFile : null,
       observed_at: planUsage ? new Date(planUsage.timestamp).toISOString() : null,
