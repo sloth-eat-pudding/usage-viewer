@@ -40,7 +40,17 @@ function findPlanUsageHistoryFiles() {
       if (fs.existsSync(file)) packageFiles.push(file)
     }
   } catch {}
-  return regularFiles.concat(packageFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs))
+  const detected = regularFiles.concat(packageFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs))
+  if (detected.length) return detected
+  // Recover only explicitly mapped profiles, never the newest arbitrary API account.
+  return readProfileMappings().map(source => source.path)
+}
+
+function readProfileMappings() {
+  try {
+    const mapping = JSON.parse(fs.readFileSync(path.join(__dirname, '../../config/claude-profile-organizations.json'), 'utf8'))
+    return Array.isArray(mapping.sources) ? mapping.sources : []
+  } catch { return [] }
 }
 
 try {
@@ -206,7 +216,8 @@ function readLatestStatusLineResets() {
 
 function readLatestPlanUsage(planUsageFile = PLAN_USAGE_HISTORY_FILE) {
   if (!fs.existsSync(planUsageFile)) {
-    return null
+    const mapping = readProfileMappings().find(source => source.path.toLowerCase() === planUsageFile.toLowerCase())
+    return mapping ? { timestamp: 0, org: mapping.organization_id } : null
   }
 
   try {

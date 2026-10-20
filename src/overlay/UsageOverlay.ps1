@@ -623,19 +623,31 @@ function Update-UsageView {
 
 function Read-ClaudePlanUsageJson {
   param([string]$Path)
-  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return $null }
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
   try {
-    $root = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    if ($null -eq $root.samples -or @($root.samples).Count -eq 0) { return $null }
-    $sample = @($root.samples | Sort-Object { [int64]$_.t })[-1]
+    $sample = $null
+    if (Test-Path -LiteralPath $Path) {
+      $root = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+      if ($root.samples -and @($root.samples).Count -gt 0) {
+        $sample = @($root.samples | Sort-Object { [int64]$_.t })[-1]
+      }
+    } else {
+      # Only an explicit profile mapping may replace a missing history file.
+      $mappingFile = Join-Path $PSScriptRoot '..\..\config\claude-profile-organizations.json'
+      $mapping = Get-Content -LiteralPath $mappingFile -Raw | ConvertFrom-Json
+      $match = @($mapping.sources | Where-Object { $_.path -ieq $Path } | Select-Object -First 1)
+      if ($match.Count -gt 0) { $sample = [pscustomobject]@{ org = $match[0].organization_id; t = 0 } }
+    }
+    if ($null -eq $sample) { return $null }
     $apiUsage = $null
     if ($sample.org) {
       $apiFile = Join-Path $usageHome "claude-desktop-api-$([string]$sample.org)-latest.json"
       $candidate = Read-UsageJson $apiFile
-      if ($candidate -and $candidate.source -eq "claude-desktop-api-bridge") {
+      if ($candidate -and $candidate.source -eq "claude-desktop-api-bridge" -and $candidate.organization_id -eq $sample.org) {
         try {
           $observedAt = [DateTimeOffset]::Parse([string]$(if ($candidate.observed_at) { $candidate.observed_at } else { $candidate.generated_at }))
-          if (([DateTimeOffset]::UtcNow - $observedAt.ToUniversalTime()).TotalMinutes -le 5) { $apiUsage = $candidate }
+          $age = ([DateTimeOffset]::UtcNow - $observedAt.ToUniversalTime()).TotalSeconds
+          if ($age -ge -30 -and $age -le 300) { $apiUsage = $candidate }
         } catch { }
       }
     }
@@ -677,7 +689,7 @@ function Update-CombinedUsageView {
     for ($desktopIndex = 0; $desktopIndex -lt $script:ClaudeDesktopSources.Count; $desktopIndex++) {
       $desktop = $script:ClaudeDesktopSources[$desktopIndex]
       $desktopGroup = Convert-GroupCode ([string]$desktop.group)
-      if ($desktopGroup -ne "Hidden") { $claudeSources += @{ Label = ConvertTo-SourceAbbreviation ([string]$desktop.name) "Claude"; Group = $desktopGroup; Data = (Read-UsageJson (Join-Path $usageHome "claude-desktop-$desktopIndex-latest.json")) } }
+      if ($desktopGroup -ne "Hidden") { $claudeSources += @{ Label = ConvertTo-SourceAbbreviation ([string]$desktop.name) "Claude"; Group = $desktopGroup; Data = (Read-ClaudePlanUsageJson ([string]$desktop.path)) } }
     }
   }
   if ($script:ClaudeCliGroup -ne "Hidden") { $claudeSources += @{ Label = "C"; Group = $script:ClaudeCliGroup; Data = (Read-UsageJson $claudeCliUsageFile) } }
