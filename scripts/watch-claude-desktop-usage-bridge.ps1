@@ -1,7 +1,12 @@
 $ErrorActionPreference = 'Stop'
 $createdNew = $false
 $mutex = [Threading.Mutex]::new($true, 'UsageViewer.ClaudeDesktopUsageBridgeWatch.v1', [ref]$createdNew)
-if (-not $createdNew) { $mutex.Dispose(); exit 0 }
+if (-not $createdNew) {
+  # Stop-Process and Windows handle cleanup can overlap a restart. Wait for
+  # the previous watchdog to release its mutex instead of silently exiting.
+  try { $acquired = $mutex.WaitOne(5000) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+  if (-not $acquired) { $mutex.Dispose(); exit 0 }
+}
 
 $usageDirectory = if ($env:USAGE_VIEWER_HOME) { $env:USAGE_VIEWER_HOME } else { Join-Path $env:USERPROFILE '.usage-viewer' }
 $bridgeScript = Join-Path $PSScriptRoot '..\src\readers\claude-desktop-usage-bridge.js'

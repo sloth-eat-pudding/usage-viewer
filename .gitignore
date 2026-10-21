@@ -4,3 +4,4 @@ dist/
 packages/
 *.user
 config/remote.env
+.tools/

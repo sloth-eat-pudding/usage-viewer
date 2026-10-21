@@ -1,4 +1,12 @@
-$ErrorActionPreference = 'SilentlyContinue'
+param(
+  [int]$WorkerProcessId = 0,
+  [string]$WorkerOrganization = '',
+  [string]$WorkerRefreshId = '',
+  [long]$WorkerWindowHandle = 0,
+  [switch]$WorkerMeterOnly
+)
+
+$ErrorActionPreference = 'Stop'
 
 if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE -eq '0') { exit 0 }
 
@@ -9,16 +17,25 @@ $usageHome = if ([string]::IsNullOrWhiteSpace($env:USAGE_VIEWER_HOME)) {
 }
 $logFile = Join-Path $usageHome 'claude-desktop-usage-injector.log'
 $createdNew = $false
-$mutex = [System.Threading.Mutex]::new($true, 'UsageViewer.ClaudeDesktopUsageInjector.v1', [ref]$createdNew)
-if (-not $createdNew) { exit 0 }
+$mutex = $null
+if ($WorkerProcessId -eq 0 -and $env:CLAUDE_DESKTOP_AUTO_BRIDGE_TEST -ne '1') {
+  $mutex = [System.Threading.Mutex]::new($true, 'UsageViewer.ClaudeDesktopUsageInjector.v2', [ref]$createdNew)
+  if (-not $createdNew) {
+    try { $acquired = $mutex.WaitOne(5000) } catch [Threading.AbandonedMutexException] { $acquired = $true }
+    if (-not $acquired) { $mutex.Dispose(); exit 0 }
+  }
+}
 
 New-Item -ItemType Directory -Path $usageHome -Force | Out-Null
-[IO.File]::AppendAllText($logFile, "$([DateTimeOffset]::UtcNow.ToString('O')) native helper loading$([Environment]::NewLine)")
 
 function Write-InjectorLog {
   param([string]$Message)
-  Add-Content -LiteralPath $logFile -Value "$([DateTimeOffset]::UtcNow.ToString('O')) $Message" -Encoding UTF8
+  try {
+    Add-Content -LiteralPath $logFile -Value "$([DateTimeOffset]::UtcNow.ToString('O')) pid=$PID $Message" -Encoding UTF8
+  } catch { } # Logging must never stop account recovery.
 }
+
+Write-InjectorLog 'native helper loading'
 
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -257,25 +274,7 @@ public static class ClaudeUsageInjectorNative
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
     }
 
-    public static bool TypeUnicode(string text)
-    {
-        foreach (char character in text)
-        {
-            var inputs = new INPUT[2];
-            inputs[0].type = INPUT_KEYBOARD;
-            inputs[0].data.ki.wScan = character;
-            inputs[0].data.ki.dwFlags = KEYEVENTF_UNICODE;
-            inputs[1] = inputs[0];
-            inputs[1].data.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
-            if (SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT))) != 2) return false;
-            // Electron can acknowledge a large burst while dropping characters
-            // before the DevTools editor processes them.
-            Thread.Sleep(2);
-        }
-        keybd_event(0x0D, 0, 0, UIntPtr.Zero);
-        keybd_event(0x0D, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-        return true;
-    }
+
 }
 '@
 
@@ -302,22 +301,14 @@ if (-not $developerModeEnabled) {
   Write-InjectorLog 'setup required: run scripts\configure-claude-desktop-auto-bridge.ps1 once'
 }
 
-function Get-ClaudeOrganizations {
+function Get-ClaudeTargets {
   $files = @()
-  $settingsFile = Join-Path $usageHome 'display-settings.json'
-  $environment = 'default'
-  try {
-    if (Test-Path -LiteralPath $settingsFile) {
-      $environment = [string]((Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json).claude_user_environment)
-    }
-  } catch {}
 
-  if ([string]::IsNullOrWhiteSpace($environment) -or $environment -eq 'default') {
-    $regular = Join-Path $env:APPDATA 'Claude\plan-usage-history.json'
-    if (Test-Path -LiteralPath $regular) { $files += $regular }
-    $packages = Join-Path $env:LOCALAPPDATA 'Packages'
-    if (Test-Path -LiteralPath $packages) {
-      $files += @(Get-ChildItem -LiteralPath $packages -Directory -Filter 'Claude_*' |
+  $regular = Join-Path $env:APPDATA 'Claude\plan-usage-history.json'
+  if (Test-Path -LiteralPath $regular) { $files += $regular }
+  $packages = Join-Path $env:LOCALAPPDATA 'Packages'
+  if (Test-Path -LiteralPath $packages) {
+    $files += @(Get-ChildItem -LiteralPath $packages -Directory -Filter 'Claude_*' |
         ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude\plan-usage-history.json' } |
         Where-Object { Test-Path -LiteralPath $_ })
     }
@@ -334,37 +325,63 @@ function Get-ClaudeOrganizations {
           Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) })
       } catch {}
     }
-  } else {
-    # The DevTools request runs inside the profile opened by Settings. Use only
-    # that profile's history so its organization ID matches its session token.
-    $customSourcesFile = Join-Path $usageHome 'claude-custom-source.json'
-    if (Test-Path -LiteralPath $customSourcesFile) {
-      try {
-        $customSettings = Get-Content -LiteralPath $customSourcesFile -Raw | ConvertFrom-Json
-        $customSources = if ($null -ne $customSettings.sources) { @($customSettings.sources) } else { @($customSettings) }
-        $files += @($customSources | Where-Object { [string]$_.name -eq $environment } | ForEach-Object { [string]$_.path } |
-          Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) })
-      } catch {}
-    }
-  }
-  $organizations = @()
+  $targets = @()
   foreach ($file in $files) {
     try {
       $history = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
-      $organizations += @($history.samples | ForEach-Object { [string]$_.org } |
-        Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' })
-    } catch {}
+      # A history file can contain samples from organizations that are no
+      # longer associated with the current Claude session. Requesting all of
+      # them produces noisy 404s from Claude's API. The newest sample is the
+      # organization that matches the profile's current session.
+      $latestSample = @($history.samples |
+        Where-Object { $_.t -as [long] -or $_.timestamp } |
+        Sort-Object -Property @{ Expression = {
+          if ($_.t -as [long]) { [long]$_.t } else { [DateTimeOffset]::Parse([string]$_.timestamp).ToUnixTimeMilliseconds() }
+        }; Descending = $true } |
+        Select-Object -First 1)
+      $organization = [string]($latestSample | Select-Object -First 1).org
+      if ($organization -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') {
+        $profile = Split-Path -Parent $file
+        $configuredSource = @($customSources | Where-Object { $_.path -eq $file -and $_.profile_path } | Select-Object -First 1)
+        if ($configuredSource.Count -gt 0) { $profile = [string]$configuredSource[0].profile_path }
+        $targets += [pscustomobject]@{
+          Organization = $organization
+          Profile = $profile
+          IsDefault = $file -eq $regular -or $file.StartsWith($packages + '\', [StringComparison]::OrdinalIgnoreCase)
+        }
+      }
+    } catch { Write-InjectorLog "history read failed file=$file reason=$($_.Exception.Message)" }
   }
-  return @($organizations | Sort-Object -Unique)
+  return @($targets | Sort-Object Profile,Organization -Unique)
+}
+
+function Get-ClaudeOrganizations {
+  return @(Get-ClaudeTargets | ForEach-Object { $_.Organization } | Sort-Object -Unique)
+}
+
+function Read-BridgeObservation {
+  param([string]$Organization, [string]$RefreshId = '')
+  try {
+    $snapshot = [IO.File]::ReadAllText((Join-Path $usageHome "claude-desktop-api-$Organization-latest.json")) | ConvertFrom-Json
+    if ($snapshot.source -ne 'claude-desktop-api-bridge' -or $snapshot.organization_id -ne $Organization) { return $null }
+    if ($RefreshId -and $snapshot.refresh_id -ne $RefreshId) { return $null }
+    $values = @($snapshot.percentages.five_hour_used, $snapshot.percentages.seven_day_used) | Where-Object { $null -ne $_ }
+    if (@($values).Count -eq 0) { return $null }
+    foreach ($value in $values) {
+      if ($value -isnot [ValueType] -or [double]::IsNaN([double]$value) -or [double]$value -lt 0 -or [double]$value -gt 100) { return $null }
+    }
+    $observation = [DateTimeOffset]::Parse([string]$snapshot.observed_at)
+    if ($observation -gt [DateTimeOffset]::UtcNow.AddSeconds(30)) { return $null }
+    return $observation
+  } catch { return $null }
 }
 
 function Get-StaleClaudeOrganizations {
   param([string[]]$Organizations)
   $stale = @()
   foreach ($organization in $Organizations) {
-    $snapshot = Join-Path $usageHome "claude-desktop-api-$organization-latest.json"
-    if (-not (Test-Path -LiteralPath $snapshot) -or
-        ([DateTimeOffset]::UtcNow - [DateTimeOffset](Get-Item -LiteralPath $snapshot).LastWriteTimeUtc).TotalSeconds -ge 150) {
+    $observation = Read-BridgeObservation $organization
+    if ($null -eq $observation -or ([DateTimeOffset]::UtcNow - $observation).TotalSeconds -ge 150) {
       $stale += $organization
     }
   }
@@ -376,109 +393,186 @@ function Test-FreshBridgeSnapshot {
   return $Organizations.Count -gt 0 -and @(Get-StaleClaudeOrganizations $Organizations).Count -eq 0
 }
 
+function Test-SessionMeterHeartbeat {
+  param([string]$Instance, [string]$RefreshId = '', [string]$Version = '1.1.0')
+  if ($Instance -notmatch '^\d{1,10}-\d{1,20}$') { return $false }
+  try {
+    $file = Join-Path $usageHome "claude-session-meter-$Instance-latest.json"
+    $heartbeat = [IO.File]::ReadAllText($file) | ConvertFrom-Json
+    if ($heartbeat.source -ne 'claude-session-meter' -or $heartbeat.instance -ne $Instance -or $heartbeat.version -ne $Version) { return $false }
+    if ($RefreshId -and $heartbeat.refresh_id -ne $RefreshId) { return $false }
+    $observedAt = [DateTimeOffset]::Parse([string]$heartbeat.observed_at)
+    $age = ([DateTimeOffset]::UtcNow - $observedAt).TotalSeconds
+    return $age -ge -30 -and $age -lt 75
+  } catch { return $false }
+}
+
+function Get-SessionMeterWindows {
+  param([object[]]$Processes, [object[]]$Windows)
+  $mainIds = @($Processes | Where-Object { -not $_.CommandLine -or $_.CommandLine -notmatch '--type=' } |
+    ForEach-Object { [int]$_.ProcessId })
+  return @($Windows | Where-Object {
+    $mainIds -contains $_.ProcessId -and -not $_.Cloaked -and $_.Title -and $_.Area -gt 10000
+  } | Sort-Object Handle -Unique)
+}
+
 function New-InjectionScript {
-  param([string[]]$Organizations)
+  param([string[]]$Organizations, [string]$RefreshId = '', [string]$SessionMeterPath = '', [string]$WindowKey = '', [switch]$MeterOnly)
+  # The same payload runs in Desktop's Code renderer. It only reads the
+  # currently selected session and adds a reversible badge beside its model.
+  if (-not $SessionMeterPath -and $PSScriptRoot) {
+    $SessionMeterPath = Join-Path $PSScriptRoot '..\src\desktop-addon\claude-session-meter.js'
+    if (-not (Test-Path -LiteralPath $SessionMeterPath)) {
+      $SessionMeterPath = Join-Path $PSScriptRoot 'claude-session-meter.js'
+    }
+  }
+  $sessionMeterScript = if ($SessionMeterPath -and (Test-Path -LiteralPath $SessionMeterPath)) { [IO.File]::ReadAllText($SessionMeterPath) } else { '' }
+  $sessionMeterFound = -not [string]::IsNullOrWhiteSpace($sessionMeterScript)
+  if ($WindowKey) {
+    if ($WindowKey -notmatch '^\d{1,10}-\d{1,20}$') { throw 'Invalid window key' }
+    $meterConfig = @{ instance = $WindowKey; refreshId = $RefreshId } | ConvertTo-Json -Compress
+    $sessionMeterScript = "window.__usageViewerSessionMeterConfig=$meterConfig;`n$sessionMeterScript"
+  }
+  # Updating the meter must not replace an already healthy account-usage timer.
+  if ($MeterOnly) {
+    if (-not $sessionMeterFound) { throw 'Session meter payload was not found' }
+    return $sessionMeterScript
+  }
   # Passing a one-item array through the pipeline is unwrapped by PowerShell,
   # producing a JSON string. -InputObject preserves the array so JavaScript
   # iterates organization IDs instead of individual UUID characters.
   $organizationJson = ConvertTo-Json -InputObject @($Organizations) -Compress
+  $refreshJson = ConvertTo-Json -InputObject $RefreshId -Compress
   $diagnosticProbe = if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE_KEEP_DEVTOOLS -eq '1') {
     "const dt=document.title;document.title='Usage Viewer injection probe';setTimeout(()=>document.title=dt,10000);"
   } else { '' }
   return @"
-(()=>{$diagnosticProbe const k='__usageViewerBridgeV2',o=$organizationJson;if(window[k])clearInterval(window[k]);const f=async()=>{for(const g of o)try{const r=await fetch('/api/organizations/'+g+'/usage');if(!r.ok)continue;const u=await r.json();await fetch('http://127.0.0.1:8765/claude-desktop-usage?org='+encodeURIComponent(g),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(u)})}catch{}};f();window[k]=setInterval(f,60000)})()
+(()=>{
+  $diagnosticProbe
+  const k='__usageViewerBridgeV3',o=new Set($organizationJson),refreshId=$refreshJson;
+  if(window[k])clearInterval(window[k]);
+  let busy=false;
+  const f=async()=>{
+    if(busy)return;
+    busy=true;
+    try{
+      for(const g of o){
+        const controller=new AbortController();
+        const timeout=setTimeout(()=>controller.abort(),10000);
+        try{
+          const r=await fetch('/api/organizations/'+g+'/usage?usage_viewer_refresh='+Date.now(),{
+            credentials:'include',cache:'no-store',signal:controller.signal
+          });
+          if(!r.ok)throw new Error('Claude usage HTTP '+r.status);
+          const u=await r.json();
+          const b=await fetch('http://127.0.0.1:8765/claude-desktop-usage?org='+encodeURIComponent(g)+'&refresh_id='+encodeURIComponent(refreshId),{
+            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(u),signal:controller.signal
+          });
+          if(!b.ok)throw new Error('Usage bridge HTTP '+b.status);
+        }catch(error){console.warn('[Usage Viewer]',g,error.message)}
+        finally{clearTimeout(timeout)}
+      }
+    }finally{busy=false}
+  };
+  f();window[k]=setInterval(f,60000);
+})()
+;
+$sessionMeterScript
 "@.Trim()
 }
 
 function Invoke-ClaudeInjection {
-  param([object]$Window, [string[]]$Organizations)
-  $previousForeground = [ClaudeUsageInjectorNative]::ForegroundWindow()
-  $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
-    Where-Object { $_.ProcessId -eq $Window.ProcessId } |
-    Select-Object -First 1
-  if ($null -eq $devTools) {
-    if (-not [ClaudeUsageInjectorNative]::Focus($Window.Handle)) {
-      Write-InjectorLog 'could not focus Claude to open DevTools'
-      return $false
-    }
-    [ClaudeUsageInjectorNative]::OpenDevTools()
-    for ($wait = 0; $wait -lt 15 -and $null -eq $devTools; $wait++) {
-      Start-Sleep -Milliseconds 300
-      $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
-        Where-Object { $_.ProcessId -eq $Window.ProcessId } |
-        Select-Object -First 1
-    }
-    if ($null -eq $devTools) {
-      Write-InjectorLog 'could not open Claude DevTools; Developer Mode may not be active for this process'
-      return $false
-    }
-    Write-InjectorLog 'opened Claude DevTools for injection'
-  }
-
-  if (-not [ClaudeUsageInjectorNative]::Focus($devTools.Handle)) { return $false }
-  Start-Sleep -Milliseconds 300
-  [ClaudeUsageInjectorNative]::OpenCommandMenu()
-  Start-Sleep -Milliseconds 300
-  [ClaudeUsageInjectorNative]::TypeUnicode('Show Console') | Out-Null
-  Start-Sleep -Milliseconds 1200
-  [ClaudeUsageInjectorNative]::OpenConsole()
-  Start-Sleep -Milliseconds 400
-  [ClaudeUsageInjectorNative]::TypeUnicode('allow pasting') | Out-Null
-  Start-Sleep -Milliseconds 300
-  $injectionScript = New-InjectionScript $Organizations
-  Write-InjectorLog "pasting injection script characters=$($injectionScript.Length)"
-  $typed = $false
-  $previousClipboard = $null
-  $hadClipboardData = $false
+  param([object]$Window, [string[]]$Organizations, [string]$RefreshId, [switch]$MeterOnly)
+  $devTools = $null
+  $openedDevTools = $false
+  $clipboardChanged = $false
+  $previousClipboardText = $null
   try {
-    $previousClipboard = [System.Windows.Forms.Clipboard]::GetDataObject()
-    $hadClipboardData = $null -ne $previousClipboard
-    Write-InjectorLog 'clipboard captured'
-    [System.Windows.Forms.Clipboard]::SetText($injectionScript)
-    Write-InjectorLog 'clipboard prepared'
-    [ClaudeUsageInjectorNative]::Paste()
-    Start-Sleep -Milliseconds 400
-    [ClaudeUsageInjectorNative]::Execute()
-    Write-InjectorLog 'clipboard paste executed'
-    $typed = $true
-  } catch {
-    Write-InjectorLog 'clipboard paste failed; falling back to paced keyboard input'
-    $typed = [ClaudeUsageInjectorNative]::TypeUnicode($injectionScript)
-  } finally {
+    $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
+      Where-Object { $_.ProcessId -eq $Window.ProcessId } | Select-Object -First 1
+    # Never change a console the user already has open.
+    if ($null -ne $devTools) { throw 'DevTools is already open; deferring to preserve the user console' }
+    if (-not [ClaudeUsageInjectorNative]::Focus($Window.Handle)) { throw 'Could not focus Claude' }
+    [ClaudeUsageInjectorNative]::OpenDevTools()
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+    do {
+      Start-Sleep -Milliseconds 200
+      $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
+        Where-Object { $_.ProcessId -eq $Window.ProcessId } | Select-Object -First 1
+    } while ($null -eq $devTools -and [DateTimeOffset]::UtcNow -lt $deadline)
+    if ($null -eq $devTools) { throw 'DevTools did not open within 5 seconds; check Developer Mode' }
+    $openedDevTools = $true
+    Write-InjectorLog "stage=console process=$($Window.ProcessId)"
+    if (-not [ClaudeUsageInjectorNative]::Focus($devTools.Handle)) { throw 'Could not focus DevTools' }
     Start-Sleep -Milliseconds 300
+    [ClaudeUsageInjectorNative]::OpenCommandMenu()
+    Start-Sleep -Milliseconds 300
+    # Capture only text, avoiding delayed IDataObject enumeration that hung
+    # the former long-running updater. This worker has an external timeout.
+    if ([Windows.Forms.Clipboard]::ContainsText()) { $previousClipboardText = [Windows.Forms.Clipboard]::GetText() }
+    [Windows.Forms.Clipboard]::SetText('Show Console')
+    $clipboardChanged = $true
+    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before console selection' }
+    [ClaudeUsageInjectorNative]::Paste()
+    Start-Sleep -Milliseconds 300
+    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before console selection submission' }
+    [ClaudeUsageInjectorNative]::Execute()
+    Start-Sleep -Milliseconds 1200
+    [ClaudeUsageInjectorNative]::OpenConsole()
+    Start-Sleep -Milliseconds 400
+    # Paste the complete script at once; do not type it character by character.
+    $script = New-InjectionScript $Organizations $RefreshId -WindowKey "$($Window.ProcessId)-$($Window.Handle)" -MeterOnly:$MeterOnly
+    [Windows.Forms.Clipboard]::SetText($script)
+    Write-InjectorLog "stage=paste process=$($Window.ProcessId) characters=$($script.Length)"
+    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before script paste' }
+    [ClaudeUsageInjectorNative]::Paste()
+    Start-Sleep -Milliseconds 500
+    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before script submission' }
+    [ClaudeUsageInjectorNative]::Execute()
+    Write-InjectorLog "stage=submitted process=$($Window.ProcessId)"
+    # Submission is not success. The supervisor waits for a new API observation.
+    Start-Sleep -Milliseconds 800
+    return $true
+  } catch {
+    Write-InjectorLog "stage=failed process=$($Window.ProcessId) reason=$($_.Exception.Message)"
+    return $false
+  } finally {
+    # Restore previous text only if the clipboard still contains our content.
+    # If the user copied something during the operation, leave their copy alone.
     try {
-      if ($hadClipboardData) {
-        [System.Windows.Forms.Clipboard]::SetDataObject($previousClipboard, $true)
-      } else {
-        [System.Windows.Forms.Clipboard]::Clear()
+      if ($clipboardChanged -and $null -ne $previousClipboardText) {
+        $currentText = [Windows.Forms.Clipboard]::GetText()
+        if ($currentText -eq 'Show Console' -or ($script -and $currentText -eq $script)) {
+          [Windows.Forms.Clipboard]::SetText($previousClipboardText)
+        }
       }
-      Write-InjectorLog 'clipboard restored'
-    } catch {
-      Write-InjectorLog 'clipboard restore failed'
+    } catch { Write-InjectorLog "clipboard text restore failed reason=$($_.Exception.Message)" }
+    if ($openedDevTools -and $env:CLAUDE_DESKTOP_AUTO_BRIDGE_KEEP_DEVTOOLS -ne '1') {
+      [ClaudeUsageInjectorNative]::Close($devTools.Handle)
+      Start-Sleep -Milliseconds 150
     }
   }
-  Start-Sleep -Milliseconds 800
-  if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE_KEEP_DEVTOOLS -eq '1') {
-    $probeVisible = @([ClaudeUsageInjectorNative]::FindClaudeWindows($false) |
-      Where-Object { $_.ProcessId -eq $Window.ProcessId -and $_.Title -eq 'Usage Viewer injection probe' }).Count -gt 0
-    Write-InjectorLog "diagnostic execution probe visible=$probeVisible"
-    Write-InjectorLog 'diagnostic mode: keeping DevTools focused for 30 seconds'
-    Start-Sleep -Seconds 30
-  } else {
-    [ClaudeUsageInjectorNative]::Close($devTools.Handle)
-    Start-Sleep -Milliseconds 150
-    [ClaudeUsageInjectorNative]::Focus($previousForeground) | Out-Null
-  }
-  return $typed
+}
+
+if ($WorkerProcessId -gt 0) {
+  if (-not $WorkerMeterOnly -and $WorkerOrganization -notmatch '^[0-9a-fA-F-]{36}$') { exit 2 }
+  $window = [ClaudeUsageInjectorNative]::FindClaudeWindows($false) |
+    Where-Object { $_.ProcessId -eq $WorkerProcessId -and -not $_.Cloaked -and
+      ($WorkerWindowHandle -eq 0 -or $_.Handle -eq $WorkerWindowHandle) } |
+    Sort-Object Area -Descending | Select-Object -First 1
+  if ($null -eq $window) { Write-InjectorLog 'worker has no visible profile window'; exit 3 }
+  $workerOrganizations = if ($WorkerMeterOnly) { @() } else { @($WorkerOrganization) }
+  if (Invoke-ClaudeInjection $window $workerOrganizations $WorkerRefreshId -MeterOnly:$WorkerMeterOnly) { exit 0 }
+  exit 4
 }
 
 if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE_TEST -eq '1') {
   $testOrganizations = @(Get-ClaudeOrganizations)
   if ($testOrganizations.Count -eq 0) { throw 'No Claude organization was found for the injector self-test.' }
   $testScript = New-InjectionScript $testOrganizations
-  if ($testScript -notmatch '__usageViewerBridgeV2' -or
+  if ($testScript -notmatch '__usageViewerBridgeV3' -or
       $testScript -notmatch '127\.0\.0\.1:8765' -or
-      $testScript -notmatch 'o=\[') {
+      $testScript -notmatch 'o=new Set\(\[') {
     throw 'The generated Claude injection script is invalid.'
   }
   foreach ($organization in $testOrganizations) {
@@ -487,8 +581,6 @@ if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE_TEST -eq '1') {
     }
   }
   Write-Output "Claude usage injector self-test passed ($($testOrganizations.Count) organization(s))."
-  $mutex.ReleaseMutex()
-  $mutex.Dispose()
   exit 0
 }
 
@@ -512,10 +604,31 @@ function Start-ConfiguredClaudeProfiles {
       Write-InjectorLog 'configured profiles could not start: Claude executable not found'
       return
     }
+    # A custom profile is a separate Electron session; it does not start the
+    # installed app's default session. Start that session independently.
+    $defaultRunning = @($processes | Where-Object {
+      $_.CommandLine -and $_.CommandLine -notmatch '--type=' -and
+      ($_.CommandLine -notmatch '--user-data-dir' -or
+       $_.CommandLine.IndexOf((Join-Path $env:APPDATA 'Claude'), [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    }).Count -gt 0
+    if (-not $defaultRunning) {
+      $app = Get-StartApps -ErrorAction Stop | Where-Object { $_.Name -eq 'Claude' } | Select-Object -First 1
+      if ($app) {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$($app.AppID)" -WindowStyle Hidden -ErrorAction Stop
+      } else {
+        Start-Process -FilePath $executable -WindowStyle Hidden -ErrorAction Stop
+      }
+      Write-InjectorLog 'started default Claude profile'
+    }
     foreach ($profile in $profiles) {
-      $running = @($processes | Where-Object {
-        $_.CommandLine -and $_.CommandLine.IndexOf($profile, [StringComparison]::OrdinalIgnoreCase) -ge 0
-      }).Count -gt 0
+      # A profile may keep its Electron process alive after its window closes.
+      # Reopening that existing session makes it available to the injector.
+      $profileProcesses = @($processes | Where-Object {
+        $_.CommandLine -and $_.CommandLine -notmatch '--type=' -and
+        $_.CommandLine.IndexOf($profile, [StringComparison]::OrdinalIgnoreCase) -ge 0
+      } | ForEach-Object { [int]$_.ProcessId })
+      $running = @([ClaudeUsageInjectorNative]::FindClaudeWindows($false) |
+        Where-Object { $profileProcesses -contains $_.ProcessId }).Count -gt 0
       if (-not $running) {
         Start-Process -FilePath $executable -ArgumentList "--user-data-dir=`"$profile`"" -WindowStyle Hidden -ErrorAction Stop
         Write-InjectorLog "started configured Claude profile=$profile"
@@ -526,66 +639,180 @@ function Start-ConfiguredClaudeProfiles {
   }
 }
 
-Write-InjectorLog 'started'
-Start-ConfiguredClaudeProfiles
-$attemptsByProcess = @{}
-$nextAttemptUtc = [DateTimeOffset]::MinValue
-$forceOnce = $env:CLAUDE_DESKTOP_AUTO_BRIDGE_FORCE_ONCE -eq '1'
+function Get-TargetWindow {
+  param([object]$Target, [object[]]$Processes, [object[]]$Windows)
+  $ids = @($Processes | Where-Object {
+    if (-not $_.CommandLine -or $_.CommandLine -match '--type=') { return $false }
+    $profileMatch = [regex]::Match($_.CommandLine, '--user-data-dir(?:=|\s+)(?:"([^"]+)"|(\S+))')
+    if (-not $profileMatch.Success) { return $Target.IsDefault }
+    $processProfile = if ($profileMatch.Groups[1].Success) { $profileMatch.Groups[1].Value } else { $profileMatch.Groups[2].Value }
+    $profileMatches = $processProfile.TrimEnd('\') -eq $Target.Profile.TrimEnd('\')
+    return $profileMatches -or ($Target.IsDefault -and $processProfile.TrimEnd('\') -eq (Join-Path $env:APPDATA 'Claude'))
+  } | ForEach-Object { [int]$_.ProcessId })
+  return $Windows | Where-Object { $ids -contains $_.ProcessId -and -not $_.Cloaked -and $_.Title } |
+    Sort-Object Area -Descending | Select-Object -First 1
+}
 
+function Get-RetryDelaySeconds {
+  param([int]$Failures)
+  return @(30, 60, 180, 600)[[Math]::Min([Math]::Max($Failures - 1, 0), 3)]
+}
+
+function Invoke-BoundedInjection {
+  param([object]$Window, [string]$Organization = '', [switch]$MeterOnly)
+  $startedAt = [DateTimeOffset]::UtcNow
+  $refreshId = [guid]::NewGuid().ToString()
+  $existingTools = @([ClaudeUsageInjectorNative]::FindClaudeWindows($true) | ForEach-Object { $_.Handle })
+  $worker = $null
+  try {
+    $workerArguments = @(
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
+      '-WorkerProcessId', [string]$Window.ProcessId, '-WorkerWindowHandle', [string]$Window.Handle, '-WorkerRefreshId', $refreshId
+    )
+    if ($MeterOnly) { $workerArguments += '-WorkerMeterOnly' }
+    else { $workerArguments += @('-WorkerOrganization', $Organization) }
+    $worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ErrorAction Stop -ArgumentList $workerArguments
+    $deadline = $startedAt.AddSeconds(45)
+    while (-not $worker.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    if (-not $worker.HasExited) {
+      $worker.Kill()
+      Write-InjectorLog "worker timeout organization=$Organization limit=45s"
+      return $false
+    }
+    if ($worker.ExitCode -ne 0) { return $false }
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
+    do {
+      if ($MeterOnly) {
+        if (Test-SessionMeterHeartbeat "$($Window.ProcessId)-$($Window.Handle)" $refreshId) { return $true }
+      } else {
+        $observation = Read-BridgeObservation $Organization $refreshId
+        if ($null -ne $observation -and $observation -ge $startedAt) { return $true }
+      }
+      Start-Sleep -Milliseconds 250
+    } while ([DateTimeOffset]::UtcNow -lt $deadline)
+    Write-InjectorLog "no new valid API observation organization=$Organization"
+    return $false
+  } finally {
+    if ($worker) {
+      if (-not $worker.HasExited) { $worker.Kill() }
+      $worker.Dispose()
+    }
+    # A killed worker cannot execute its own finally block.
+    $tools = @([ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
+      Where-Object { $_.ProcessId -eq $Window.ProcessId -and $existingTools -notcontains $_.Handle })
+    if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE_KEEP_DEVTOOLS -ne '1') {
+      foreach ($tool in $tools) { [ClaudeUsageInjectorNative]::Close($tool.Handle) }
+    }
+  }
+}
+
+Write-InjectorLog 'supervisor started'
+$states = @{}
+$meterStates = @{}
+$nextWindowCheck = [DateTimeOffset]::MinValue
+$nextProfileCheck = [DateTimeOffset]::MinValue
+$nextBridgeLog = [DateTimeOffset]::MinValue
+$forceOnce = $env:CLAUDE_DESKTOP_AUTO_BRIDGE_FORCE_ONCE -eq '1'
 try {
   while ($true) {
     Start-Sleep -Seconds 1
-    $organizations = @(Get-ClaudeOrganizations)
-    if ($organizations.Count -eq 0 -or (-not $forceOnce -and (Test-FreshBridgeSnapshot $organizations))) { continue }
-    if ([DateTimeOffset]::UtcNow -lt $nextAttemptUtc) { continue }
-    if ([ClaudeUsageInjectorNative]::IdleMilliseconds() -lt 2500) { continue }
-
-    $window = [ClaudeUsageInjectorNative]::FindClaudeWindows($false) |
-      # Minimized Claude windows have only a tiny restore-icon rectangle. They
-      # are still valid account sessions and Focus() restores them before use.
-      Where-Object { -not $_.Cloaked -and -not [string]::IsNullOrWhiteSpace($_.Title) } |
-      Sort-Object @{ Expression = {
-        if ($attemptsByProcess.ContainsKey($_.ProcessId)) { [int]$attemptsByProcess[$_.ProcessId] } else { 0 }
-      } },
-      # Prefer the newest Claude window. An older background/profile window can
-      # stay alive for days and otherwise monopolize every injection attempt.
-      @{ Expression = { (Get-Process -Id $_.ProcessId).StartTime }; Descending = $true },
-      @{ Expression = 'Area'; Descending = $true } |
-      Select-Object -First 1
-    if ($null -eq $window) { continue }
-    $attemptCount = if ($attemptsByProcess.ContainsKey($window.ProcessId)) { [int]$attemptsByProcess[$window.ProcessId] } else { 0 }
-    if ($attemptCount -ge 4) {
-      # Four failures trigger a cooldown, not a permanent ban for this process.
-      $attemptsByProcess[$window.ProcessId] = 0
-      $nextAttemptUtc = [DateTimeOffset]::UtcNow.AddMinutes(30)
-      continue
-    }
-
-    $attemptsByProcess[$window.ProcessId] = $attemptCount + 1
-    $forceOnce = $false
-    Write-InjectorLog "injecting process=$($window.ProcessId) organizations=$($organizations.Count) attempt=$($attemptCount + 1)"
-    $staleBefore = @(Get-StaleClaudeOrganizations $organizations)
-    if (Invoke-ClaudeInjection $window $organizations) {
-      Start-Sleep -Seconds 3
-      $staleAfter = @(Get-StaleClaudeOrganizations $organizations)
-      if ($staleAfter.Count -eq 0) {
-        Write-InjectorLog 'bridge snapshot refreshed successfully'
-        $attemptsByProcess[$window.ProcessId] = 0
-        $nextAttemptUtc = [DateTimeOffset]::UtcNow.AddMinutes(2)
+    try {
+      # Meter discovery is independent of account history and quota freshness.
+      # A newly opened second profile must not be skipped because another
+      # window is still refreshing the same organization's usage snapshot.
+      if ([DateTimeOffset]::UtcNow -ge $nextWindowCheck) {
+        $nextWindowCheck = [DateTimeOffset]::UtcNow.AddSeconds(5)
+        $meterProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'Claude.exe'" -ErrorAction Stop)
+        $meterWindows = @(Get-SessionMeterWindows $meterProcesses @([ClaudeUsageInjectorNative]::FindClaudeWindows($false)))
+        $activeInstances = @($meterWindows | ForEach-Object { "$($_.ProcessId)-$($_.Handle)" })
+        foreach ($instance in @($meterStates.Keys)) { if ($activeInstances -notcontains $instance) { $meterStates.Remove($instance) } }
+        $meterAttempted = $false
+        foreach ($meterWindow in $meterWindows) {
+          $instance = "$($meterWindow.ProcessId)-$($meterWindow.Handle)"
+          if (Test-SessionMeterHeartbeat $instance) { continue }
+          if (-not $meterStates.ContainsKey($instance)) { $meterStates[$instance] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue } }
+          $meterState = $meterStates[$instance]
+          if ([DateTimeOffset]::UtcNow -lt $meterState.NextAttempt) { continue }
+          if ([ClaudeUsageInjectorNative]::IdleMilliseconds() -lt 2500) { break }
+          try {
+            $meterHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 2
+            if ($meterHealth.status -ne 'ok') { break }
+          } catch { break }
+          $meterAttempted = $true
+          Write-InjectorLog "meter attempt window=$instance"
+          if (Invoke-BoundedInjection $meterWindow -MeterOnly) {
+            $meterState.Failures = 0
+            $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds(75)
+            Write-InjectorLog "meter verified window=$instance version=1.1.0"
+          } else {
+            $meterState.Failures++
+            $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds((Get-RetryDelaySeconds $meterState.Failures))
+            Write-InjectorLog "meter retry window=$instance failures=$($meterState.Failures)"
+          }
+          break
+        }
+        if ($meterAttempted) { continue }
+      }
+      $targets = @(Get-ClaudeTargets)
+      $staleOrganizations = @(Get-StaleClaudeOrganizations @($targets | ForEach-Object { $_.Organization }))
+      if ($targets.Count -eq 0 -or (-not $forceOnce -and $staleOrganizations.Count -eq 0)) { continue }
+      # Avoid stealing focus when the bridge itself is unavailable.
+      try {
+        $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/health' -TimeoutSec 2
+        if ($health.status -ne 'ok') { throw 'Invalid bridge health response' }
+      } catch {
+        if ([DateTimeOffset]::UtcNow -ge $nextBridgeLog) {
+          Write-InjectorLog "bridge unavailable; waiting for bridge watchdog reason=$($_.Exception.Message)"
+          $nextBridgeLog = [DateTimeOffset]::UtcNow.AddMinutes(1)
+        }
+        Start-Sleep -Seconds 5
         continue
       }
-      if ($staleAfter.Count -lt $staleBefore.Count) {
-        Write-InjectorLog "bridge snapshot partially refreshed; remaining=$($staleAfter.Count)"
-        $nextAttemptUtc = [DateTimeOffset]::UtcNow.AddSeconds(2)
-        continue
+      if ([DateTimeOffset]::UtcNow -ge $nextProfileCheck) {
+        Start-ConfiguredClaudeProfiles
+        $nextProfileCheck = [DateTimeOffset]::UtcNow.AddMinutes(2)
       }
+      if ([ClaudeUsageInjectorNative]::IdleMilliseconds() -lt 2500) { continue }
+      $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'Claude.exe'" -ErrorAction Stop)
+      $windows = @([ClaudeUsageInjectorNative]::FindClaudeWindows($false))
+      foreach ($target in $targets) {
+        if (-not $forceOnce -and $staleOrganizations -notcontains $target.Organization) { continue }
+        $key = $target.Profile + '|' + $target.Organization
+        if (-not $states.ContainsKey($key)) {
+          $states[$key] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue }
+        }
+        $state = $states[$key]
+        if ([DateTimeOffset]::UtcNow -lt $state.NextAttempt) { continue }
+        $window = Get-TargetWindow $target $processes $windows
+        $success = $false
+        if ($null -eq $window) {
+          Write-InjectorLog "profile window unavailable organization=$($target.Organization) profile=$($target.Profile)"
+        } else {
+          Write-InjectorLog "attempt organization=$($target.Organization) process=$($window.ProcessId) failures=$($state.Failures)"
+          $success = Invoke-BoundedInjection $window $target.Organization
+        }
+        if ($success) {
+          $state.Failures = 0
+          $state.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds(150)
+          Write-InjectorLog "verified fresh API observation organization=$($target.Organization)"
+        } else {
+          $state.Failures++
+          $delay = Get-RetryDelaySeconds $state.Failures
+          $state.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds($delay)
+          Write-InjectorLog "retry organization=$($target.Organization) in=${delay}s"
+        }
+        $forceOnce = $false
+        break # Recheck idle state and freshness before operating another profile.
+      }
+      # Discard state for accounts removed from configuration.
+      $activeKeys = @($targets | ForEach-Object { $_.Profile + '|' + $_.Organization })
+      foreach ($key in @($states.Keys)) { if ($activeKeys -notcontains $key) { $states.Remove($key) } }
+    } catch {
+      Write-InjectorLog "supervisor iteration failed reason=$($_.Exception.Message)"
+      Start-Sleep -Seconds 5
     }
-    Write-InjectorLog 'injection did not refresh a bridge snapshot'
-    $delayMinutes = @(1, 3, 10, 30)[[Math]::Min($attemptCount, 3)]
-    $nextAttemptUtc = [DateTimeOffset]::UtcNow.AddMinutes($delayMinutes)
   }
 } finally {
-  Write-InjectorLog 'stopped'
-  $mutex.ReleaseMutex()
-  $mutex.Dispose()
+  Write-InjectorLog 'supervisor stopped'
+  if ($mutex) { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }

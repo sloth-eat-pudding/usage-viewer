@@ -79,6 +79,14 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 收到 bridge snapshot 後，Claude Desktop reader 會在五分鐘內優先採用其中精確的重置時間；超時後自動回退到本機 usage history 的推估值。
 
+## Claude Desktop 模型旁的 session 顯示
+
+既有 Developer Mode 注入流程也會載入 `src/desktop-addon/claude-session-meter.js`，在 Desktop **Code session（含 SSH）** 的模型按鈕旁顯示快取剩餘時間推估、cache 命中率與 session 費用。點擊數字可查看 token 明細與資料限制。
+
+日常啟動可直接雙擊專案根目錄的 `Start-Claude-Session-Meter.cmd`。同時開啟兩個 Claude Desktop／profile 時，只需啟動一次；背景程序會依序檢查各視窗，鍵鼠閒置後自動加入顯示，後開的視窗也會納入。
+
+它透過 Desktop 已有的唯讀 session 介面取得目前對話紀錄，不會發送模型請求來保溫。費用優先顯示引擎回報的累計值；缺少回報時才依已知模型與 cache 分類推估 API 成本，兩者皆不是訂閱方案的實際帳單。一般 Chat／Cowork 與多個模型選擇器的分割畫面目前不顯示，避免配對錯誤。詳細說明見 [session 顯示元件](docs/claude-session-meter.md)。
+
 腳本版的啟動與重新啟動入口都會執行 `scripts\watch-claude-desktop-usage-bridge.ps1`，每 15 秒檢查本機 bridge，未啟動或停止回應時自動恢復。啟動紀錄與標準錯誤保存在 `%USERPROFILE%\.usage-viewer\claude-desktop-usage-bridge-watch.log` 與 `claude-desktop-usage-bridge.stderr.log`。
 
 ## 遠端 Codex 同步（可選）
@@ -107,6 +115,14 @@ Copy-Item config\remote.env.example config\remote.env
 ```
 
 修改 reader、overlay、WPF UI 或設定後，先做適當的語法／建置檢查，再執行 `scripts\restart-usage-viewer.cmd`。WPF 與腳本 reader 都必須維持相同的 snapshot 格式與來源分組語意。
+
+完整本機檢查（需 Node.js 與 .NET 7 SDK）：
+
+```powershell
+.\scripts\test-usage-viewer.ps1
+```
+
+這個入口會檢查腳本語法、執行兩種 bridge 共用的格式案例、Claude injector／HTTP bridge 測試、C# reader／設定回歸測試，以及 WPF Release 建置。測試使用獨立暫存資料，不會啟動桌面注入。可用 `-DotNetPath` 指定 SDK 的 `dotnet.exe`；元件職責與後續修改原則見 [架構與回歸測試](docs/architecture.md)。
 
 ## 建置與發布
 

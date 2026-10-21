@@ -23,13 +23,19 @@ $bridgeProcessIds |
   Where-Object { $_ -ne $PID } |
   ForEach-Object { Stop-Process -Id $_ -Force }
 
-Get-CimInstance Win32_Process |
-  Where-Object {
-    $process = $_
-    $process.ProcessId -ne $PID -and
-    ($patterns | Where-Object { $process.CommandLine -like $_ } | Select-Object -First 1)
-  } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+try {
+  Get-CimInstance Win32_Process -ErrorAction Stop |
+    Where-Object {
+      $process = $_
+      $process.ProcessId -ne $PID -and
+      ($patterns | Where-Object { $process.CommandLine -like $_ } | Select-Object -First 1)
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+} catch {
+  # Some managed Windows sessions deny Win32_Process command-line access.
+  # The bridge owner was already handled via netstat above; continue so the
+  # new readers and overlay can still be started.
+}
 
 Start-Sleep -Milliseconds 500
 Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\..\src\overlay\UsageOverlay.ps1",'-DisplayMode','combined' -WindowStyle Hidden

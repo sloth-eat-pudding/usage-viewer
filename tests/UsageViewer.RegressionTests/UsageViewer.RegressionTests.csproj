@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <!-- Exercise production components without WPF or test packages. -->
+  <ItemGroup>
+    <Compile Include="../../src/UsageViewer/Storage/*.cs" Link="Storage/%(Filename)%(Extension)" />
+    <Compile Include="../../src/UsageViewer/Readers/*.cs" Link="Readers/%(Filename)%(Extension)" />
+    <Compile Include="../../src/UsageViewer/Integration/ClaudeUsageContract.cs" Link="ClaudeUsageContract.cs" />
+    <Compile Include="../../src/UsageViewer/Integration/SessionMeterHeartbeat.cs" Link="SessionMeterHeartbeat.cs" />
+    <Compile Include="../../src/UsageViewer/Settings/DisplaySettings.cs" Link="DisplaySettings.cs" />
+    <Compile Include="../../src/UsageViewer/Settings/DisplayGroups.cs" Link="DisplayGroups.cs" />
+    <Compile Include="../../src/UsageViewer/Settings/DisplaySettingsStore.cs" Link="DisplaySettingsStore.cs" />
+    <None Include="../fixtures/claude-usage.json" Link="claude-usage.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

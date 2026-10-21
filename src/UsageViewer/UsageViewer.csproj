@@ -12,6 +12,7 @@
   <ItemGroup>
     <Resource Include="usage-viewer.ico" />
     <EmbeddedResource Include="..\..\scripts\claude-desktop-usage-injector.ps1" LogicalName="UsageViewer.ClaudeDesktopUsageInjector.ps1" />
+    <EmbeddedResource Include="..\desktop-addon\claude-session-meter.js" LogicalName="UsageViewer.ClaudeSessionMeter.js" />
     <None Include="..\..\scripts\sync-codex-remote.ps1" Link="scripts\sync-codex-remote.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
     <!-- remote.env is an optional, machine-specific file and is gitignored. -->
     <None Include="..\..\config\remote.env" Link="config/remote.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" Condition="Exists('..\..\config\remote.env')" />
