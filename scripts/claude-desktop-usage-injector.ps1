@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'claude-desktop-profiles.ps1')
 
 if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE -eq '0') { exit 0 }
 
@@ -285,6 +286,7 @@ if (Test-Path -LiteralPath $packagesRoot) {
   $developerSettings += @(Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter 'Claude_*' |
     ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude\developer_settings.json' })
 }
+$developerSettings += @(Get-ClaudeDesktopProfiles | ForEach-Object { Join-Path (Split-Path -Parent $_.path) 'developer_settings.json' })
 foreach ($settingsFile in $developerSettings) {
   try {
     if ((Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json).allowDevTools -eq $true) {
@@ -302,16 +304,9 @@ if (-not $developerModeEnabled) {
 }
 
 function Get-ClaudeTargets {
-  $files = @()
-
-  $regular = Join-Path $env:APPDATA 'Claude\plan-usage-history.json'
-  if (Test-Path -LiteralPath $regular) { $files += $regular }
-  $packages = Join-Path $env:LOCALAPPDATA 'Packages'
-  if (Test-Path -LiteralPath $packages) {
-    $files += @(Get-ChildItem -LiteralPath $packages -Directory -Filter 'Claude_*' |
-        ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude\plan-usage-history.json' } |
-        Where-Object { Test-Path -LiteralPath $_ })
-    }
+  $defaultProfiles = @(Get-ClaudeDesktopProfiles)
+  $files = @($defaultProfiles | ForEach-Object { $_.path })
+  $customSources = @()
     # Include every configured Claude profile as well.  Profiles such as
     # Claude-Self live outside the regular APPDATA/MSIX locations and would
     # otherwise be displayed by the reader but never included in the bridge
@@ -347,7 +342,7 @@ function Get-ClaudeTargets {
         $targets += [pscustomobject]@{
           Organization = $organization
           Profile = $profile
-          IsDefault = $file -eq $regular -or $file.StartsWith($packages + '\', [StringComparison]::OrdinalIgnoreCase)
+          IsDefault = @($defaultProfiles | Where-Object { $_.path -ieq $file }).Count -gt 0
         }
       }
     } catch { Write-InjectorLog "history read failed file=$file reason=$($_.Exception.Message)" }
@@ -394,7 +389,7 @@ function Test-FreshBridgeSnapshot {
 }
 
 function Test-SessionMeterHeartbeat {
-  param([string]$Instance, [string]$RefreshId = '', [string]$Version = '1.1.0')
+  param([string]$Instance, [string]$RefreshId = '', [string]$Version = '1.2.0')
   if ($Instance -notmatch '^\d{1,10}-\d{1,20}$') { return $false }
   try {
     $file = Join-Path $usageHome "claude-session-meter-$Instance-latest.json"
@@ -743,7 +738,7 @@ try {
           if (Invoke-BoundedInjection $meterWindow -MeterOnly) {
             $meterState.Failures = 0
             $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds(75)
-            Write-InjectorLog "meter verified window=$instance version=1.1.0"
+            Write-InjectorLog "meter verified window=$instance version=1.2.0"
           } else {
             $meterState.Failures++
             $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds((Get-RetryDelaySeconds $meterState.Failures))

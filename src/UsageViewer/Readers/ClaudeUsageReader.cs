@@ -420,32 +420,8 @@ internal sealed class ClaudeUsageReader : IDisposable
         catch { return null; }
     }
 
-    private static IReadOnlyList<string> FindClaudePlanUsageHistories()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var regularInstallPath = Path.Combine(appData, "Claude", "plan-usage-history.json");
-        var candidates = new List<string>();
-        if (File.Exists(regularInstallPath)) candidates.Add(regularInstallPath);
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        try
-        {
-            var packages = Path.Combine(localAppData, "Packages");
-            if (Directory.Exists(packages))
-            {
-                candidates = Directory.EnumerateDirectories(packages, "Claude_*")
-                    .Select(directory => Path.Combine(directory, "LocalCache", "Roaming", "Claude", "plan-usage-history.json"))
-                    .ToList();
-            }
-        }
-        catch { }
-
-        return candidates.Where(File.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(path => path.Equals(regularInstallPath, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
-            .ThenByDescending(File.GetLastWriteTimeUtc)
-            .ToList();
-    }
+    private static IReadOnlyList<string> FindClaudePlanUsageHistories() =>
+        ClaudeDesktopProfiles.Find().Select(profile => profile.Path).ToList();
 
     private string? FindSelectedClaudePlanUsageHistory(IReadOnlyList<string> defaults)
     {

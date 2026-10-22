@@ -8,6 +8,7 @@ const http = require('http')
 const os = require('os')
 const path = require('path')
 const { normalizeUsage } = require('./claude-usage-contract')
+const { readSubagentUsage } = require('./claude-subagent-usage')
 
 const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
@@ -32,6 +33,12 @@ http.createServer((request, response) => {
 
   if (request.method === 'GET' && requestUrl.pathname === '/health') {
     return respond(response, 200, { status: 'ok' })
+  }
+
+  if (request.method === 'GET' && requestUrl.pathname === '/claude-subagent-usage') {
+    if (!ALLOWED_ORIGINS.has(origin)) return respond(response, 403)
+    try { return respond(response, 200, readSubagentUsage(requestUrl.searchParams.get('session') || ''), origin) }
+    catch { return respond(response, 400, { error: 'Invalid session ID' }, origin) }
   }
 
   const isMeterHeartbeat = requestUrl.pathname === '/claude-session-meter-heartbeat'
@@ -99,7 +106,7 @@ function snapshotFileForOrganization(organizationId) {
 function corsHeaders(origin) {
   return {
     'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     Vary: 'Origin'
   }

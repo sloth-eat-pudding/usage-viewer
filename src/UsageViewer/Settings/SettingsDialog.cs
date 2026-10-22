@@ -36,7 +36,7 @@ internal static class SettingsDialog
         var configuredDesktop = detectedDesktop.Select((source, index) =>
         {
             var saved = settings.ClaudeDesktopSources.FirstOrDefault(item => item.Path.Equals(source.Path, StringComparison.OrdinalIgnoreCase));
-            var fallbackGroup = index == 0 ? settings.ClaudeDesktopGroup : (index + 1).ToString(CultureInfo.InvariantCulture);
+            var fallbackGroup = source.Group;
             return new ConfiguredSource(source.Name, source.Path, saved?.Group ?? fallbackGroup);
         }).ToList();
         if (configuredDesktop.Count == 0) configuredDesktop.Add(new ConfiguredSource("Claude Desktop", "", settings.ClaudeDesktopGroup));

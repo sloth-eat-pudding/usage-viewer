@@ -48,6 +48,15 @@ internal sealed class BackgroundProcesses : IDisposable
             var path = Path.Combine(_home, "claude-desktop-usage-injector.ps1");
             Directory.CreateDirectory(_home);
             if (!File.Exists(path) || File.ReadAllText(path) != script) File.WriteAllText(path, script, new UTF8Encoding(false));
+            using var profilesResource = typeof(UsageReaderService).Assembly.GetManifestResourceStream("UsageViewer.ClaudeDesktopProfiles.ps1");
+            if (profilesResource is null) throw new InvalidDataException("Claude profile discovery script is missing");
+            using (var profilesReader = new StreamReader(profilesResource, Encoding.UTF8))
+            {
+                var profiles = profilesReader.ReadToEnd();
+                var profilesPath = Path.Combine(_home, "claude-desktop-profiles.ps1");
+                if (!File.Exists(profilesPath) || File.ReadAllText(profilesPath) != profiles)
+                    File.WriteAllText(profilesPath, profiles, new UTF8Encoding(false));
+            }
             using var meterResource = typeof(UsageReaderService).Assembly.GetManifestResourceStream("UsageViewer.ClaudeSessionMeter.js");
             if (meterResource is not null)
             {

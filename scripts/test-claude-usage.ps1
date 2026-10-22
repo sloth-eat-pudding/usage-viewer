@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'claude-desktop-profiles.ps1')
 $scriptPath = Join-Path $PSScriptRoot 'claude-desktop-usage-injector.ps1'
 $tokens = $null
 $parseErrors = $null
@@ -22,6 +23,26 @@ New-Item -ItemType Directory -Path $usageHome | Out-Null
 $organization = '11111111-1111-1111-1111-111111111111'
 $path = Join-Path $usageHome "claude-desktop-api-$organization-latest.json"
 try {
+  # Reproduce the packaged app's profile migration, with both locations present.
+  $fixtureAppData = Join-Path $usageHome 'roaming'
+  $fixtureLocalData = Join-Path $usageHome 'local'
+  $oldHistory = Join-Path $fixtureLocalData 'Packages\Claude_test\LocalCache\Roaming\Claude\plan-usage-history.json'
+  $newHistory = Join-Path $fixtureLocalData 'Claude-Data\claude_test\plan-usage-history.json'
+  $regularHistory = Join-Path $fixtureAppData 'Claude\plan-usage-history.json'
+  foreach ($historyPath in @($oldHistory, $newHistory, $regularHistory)) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $historyPath) -Force | Out-Null
+    [IO.File]::WriteAllText($historyPath, '{"samples":[]}')
+  }
+  $profiles = @(Get-ClaudeDesktopProfiles $fixtureAppData $fixtureLocalData)
+  Assert-True ($profiles.Count -eq 2) 'Migrated and legacy copies of one family must not create duplicate sources'
+  Assert-True ($profiles[1].path -ieq (Get-Item -LiteralPath $newHistory).FullName) 'Claude-Data must take precedence over Packages'
+  Assert-True ($profiles[1].legacy_path -ieq $oldHistory) 'Migration must preserve the old path identity for saved groups'
+  Remove-Item -LiteralPath $newHistory
+  $profiles = @(Get-ClaudeDesktopProfiles $fixtureAppData $fixtureLocalData)
+  Assert-True ($profiles[1].path -ieq (Get-Item -LiteralPath $oldHistory).FullName) 'Older installations must still be discovered'
+  Remove-Item -LiteralPath $oldHistory
+  $profiles = @(Get-ClaudeDesktopProfiles $fixtureAppData $fixtureLocalData)
+  Assert-True ($profiles.Count -eq 1) 'Missing packaged profiles must not replace the regular installation'
   Assert-True ($null -eq (Read-BridgeObservation $organization)) 'Missing snapshot must be stale'
   $snapshot = @{
     source = 'claude-desktop-api-bridge'; organization_id = $organization
@@ -77,14 +98,14 @@ try {
   Assert-True ($discoveredWindows.Count -eq 3) 'Discover both profiles and multiple windows from one process, excluding renderers and cloaked windows'
   Assert-True (@($discoveredWindows | Where-Object { $_.ProcessId -eq 2 }).Count -eq 2) 'A second window in the same profile must not be lost'
   $path = Join-Path $usageHome 'claude-session-meter-2-1002-latest.json'
-  $heartbeat = @{ source = 'claude-session-meter'; instance = '2-1002'; version = '1.1.0'; refresh_id = $refreshId; observed_at = [DateTimeOffset]::UtcNow.ToString('O') }
+  $heartbeat = @{ source = 'claude-session-meter'; instance = '2-1002'; version = '1.2.0'; refresh_id = $refreshId; observed_at = [DateTimeOffset]::UtcNow.ToString('O') }
   Write-TestSnapshot $heartbeat
   Assert-True (Test-SessionMeterHeartbeat '2-1002' $refreshId) 'A matching current window heartbeat must be fresh'
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1003')) 'One window heartbeat cannot acknowledge another window'
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002' ([guid]::NewGuid().ToString()))) 'An older injection cannot acknowledge a new worker'
   $heartbeat.version = '1.0.0'; Write-TestSnapshot $heartbeat
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002')) 'Old meter versions must be upgraded'
-  $heartbeat.version = '1.1.0'; $heartbeat.observed_at = [DateTimeOffset]::UtcNow.AddSeconds(-90).ToString('O'); Write-TestSnapshot $heartbeat
+  $heartbeat.version = '1.2.0'; $heartbeat.observed_at = [DateTimeOffset]::UtcNow.AddSeconds(-90).ToString('O'); Write-TestSnapshot $heartbeat
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002')) 'A reloaded page stops heartbeats and must be reinjected'
   # Compile the actual Win32 helper without calling its input methods.
   $source = Get-Content $scriptPath -Raw

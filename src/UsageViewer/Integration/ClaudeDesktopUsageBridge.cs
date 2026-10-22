@@ -71,6 +71,13 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
                 response.Close();
                 return;
             }
+            if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/claude-subagent-usage")
+            {
+                if (!allowedOrigin) { await WriteBridgeResponse(response, 403); return; }
+                var usage = ClaudeSubagentUsage.Read(request.QueryString["session"] ?? "");
+                await WriteBridgeResponse(response, 200, JsonSerializer.Serialize(usage), origin);
+                return;
+            }
             var isMeterHeartbeat = request.Url?.AbsolutePath == "/claude-session-meter-heartbeat";
             if (request.HttpMethod != "POST" || (!isMeterHeartbeat && request.Url?.AbsolutePath != "/claude-desktop-usage") || !allowedOrigin)
             {
@@ -119,7 +126,7 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
     private static void AddCorsHeaders(HttpListenerResponse response, string origin)
     {
         response.Headers["Access-Control-Allow-Origin"] = origin;
-        response.Headers["Access-Control-Allow-Methods"] = "POST, OPTIONS";
+        response.Headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
         response.Headers["Vary"] = "Origin";
     }

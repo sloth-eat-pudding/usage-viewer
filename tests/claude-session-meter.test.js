@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict')
 const test = require('node:test')
-const { summarize, estimateCost, labels, sessionId, install } = require('../src/desktop-addon/claude-session-meter')
+const { summarize, combineUsage, readSessionUsage, estimateCost, labels, details, sessionId, install } = require('../src/desktop-addon/claude-session-meter')
 const now = Date.parse('2026-10-21T00:00:00Z')
 const model = 'claude-opus-5-5'
 const idA = 'local_11111111-1111-1111-1111-111111111111'
@@ -84,6 +84,24 @@ test('marks truncated transcript statistics as partial', () => {
   assert.equal(summarize([message('m')], { transcriptTruncated: true }).partial, true)
 })
 
+test('zero-token synthetic quota errors do not cancel a real session cost estimate', () => {
+  const synthetic = message('quota-error', { message: { id: 'quota-error', model: '<synthetic>',
+    usage: usage({ input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+      cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+      server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 } }) } })
+  const expected = summarize([message('m')], {}, now)
+  const result = summarize([message('m'), synthetic], {}, now)
+  assert.equal(result.cost.estimateUsd, expected.cost.estimateUsd)
+  assert.deepEqual(result.totals, expected.totals)
+  assert.equal(result.requests, 1)
+  assert.equal(summarize([synthetic]).cost.estimateUsd, null)
+  for (const overrides of [{ input_tokens: 1 }, { output_tokens: undefined },
+    { server_tool_use: { web_search_requests: 1 } }, { cache_creation: { ephemeral_1h_input_tokens: 1 } }]) {
+    const unpriced = { ...synthetic, message: { ...synthetic.message, usage: { ...synthetic.message.usage, ...overrides } } }
+    assert.equal(summarize([message('m'), unpriced]).cost.estimateUsd, null)
+  }
+})
+
 test('recognizes only the observed Desktop Code route', () => {
   assert.equal(sessionId('/epitaxy/' + idA), idA)
   assert.equal(sessionId('/chat/' + idA), null)
@@ -106,6 +124,51 @@ function fakeWindow(api) {
   }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve))
+
+test('sums children once without adding a parent cumulative report or mixing cache clocks', () => {
+  const parent = message('parent')
+  const child = message('child', { isSidechain: true, timestamp: new Date(now + 120000).toISOString() })
+  const rows = [parent, { type: 'result', total_cost_usd: 100, timestamp: new Date(now).toISOString() }]
+  const payload = { session_id: 'engine', complete: true, agents: [
+    { id: 'a1', rows: [parent, child, child] }, { id: 'a1', rows: [child] }, { id: 'a2', rows: [child] }
+  ] }
+  const result = combineUsage(rows, {}, payload, 'engine', now + 120000)
+  assert.equal(result.requests, 2)
+  assert.equal(result.totals.cacheRead, 200)
+  assert.equal(result.cost.reportedUsd, null)
+  assert.equal(result.cost.estimateUsd, summarize([parent]).cost.estimateUsd * 2)
+  assert.deepEqual(result.cache, summarize([parent], {}, now + 120000).cache)
+  assert.match(labels(result).cost, /合計/)
+  assert.match(details(result), /主對話估算/)
+})
+
+test('incomplete or wrong-session children are visibly partial, unknown pricing stays unknown', () => {
+  const rows = [message('parent')]
+  const partial = combineUsage(rows, {}, { session_id: 'engine', complete: false, missing: 1, agents: [] }, 'engine')
+  assert.equal(partial.partial, true)
+  assert.match(labels(partial).cost, /部分/)
+  assert.match(details(partial), /未配對 1/)
+  const wrong = combineUsage(rows, {}, { session_id: 'other', complete: true, agents: [{id:'a1',rows:[message('child')]}] }, 'engine')
+  assert.equal(wrong.subagents.count, 0)
+  assert.equal(wrong.partial, true)
+  const unpriced = message('unknown', {message:{id:'unknown',model:'unknown',usage:usage()}})
+  const unknown = combineUsage(rows, {}, {session_id:'engine',complete:true,agents:[{id:'a1',rows:[unpriced]}]}, 'engine')
+  assert.equal(unknown.cost.estimateUsd, null)
+})
+
+test('reads child accounting only for one unambiguous engine and retains parent on bridge failure', async () => {
+  const engine = '11111111-1111-1111-1111-111111111111'
+  const rows = [message('parent', {sessionId:engine}), {sessionId:engine,type:'assistant',message:{content:[{type:'tool_use',name:'Agent',id:'t1'}]}}]
+  const win = {AbortController,setTimeout,clearTimeout,fetch:async url => {
+    assert.match(url, /session=11111111-1111-1111-1111-111111111111$/)
+    return {ok:true,json:async()=>({session_id:engine,complete:true,agents:[{id:'a1',rows:[message('child')]}]})}
+  }}
+  assert.equal((await readSessionUsage(win,rows,{})).requests,2)
+  win.fetch = async () => { throw new Error('offline') }
+  const offline = await readSessionUsage(win, rows, {})
+  assert.equal(offline.requests, 1)
+  assert.equal(offline.partial, true)
+})
 
 test('late results from a previous session cannot overwrite the active session', async () => {
   let resolveOld

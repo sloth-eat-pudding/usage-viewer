@@ -5,11 +5,13 @@
 ## 顯示內容
 
 - `快取 1h≈52:17`：從紀錄中觀測到 1 小時 cache，依最後一次 cache 使用時間推估剩餘時間。5 分鐘／1 小時的混合紀錄會分別顯示；未回報 TTL 時顯示未知。
-- `命中 97.1%`：此 session 可見主對話紀錄的 cache read tokens／全部輸入 tokens。這是 session 累計命中率，不是 context window 的剩餘容量。
+- `命中 97.1%`：此 session 主對話及已配對子代理的 cache read tokens／全部輸入 tokens。這是 session 累計命中率，不是 context window 的剩餘容量。
 - `US$6.38 回報`：最近完成回合的 `total_cost_usd` 累計回報。多個回合的累計數字不再相加。若偵測到累計值下降，標示「本段」。
 - `≈US$...`：沒有引擎費用回報時，依官方 API 單價推估可見紀錄成本。未知模型、TTL 分類或價格修正因素會顯示費用未提供，不填入零。
 
-點擊這一列，可查看輸入／輸出、cache read／write、5m／1h write token 數及來源說明。再次點擊收起。
+偵測到 Agent／Task 呼叫時，費用預設顯示主對話與已配對子代理的 API 成本估算合計。主對話的累計費用回報不會再與子代理估算相加，避免回報已含子代理時重複計價。快取倒數維持主對話的狀態。
+
+點擊這一列，可查看主對話／子代理費用分項、輸入／輸出、cache read／write、5m／1h write token 數及來源說明。再次點擊收起。
 
 倒數是推估，不是伺服器提供的到期保證。快取可能因 prefix 或設定改變而提前無法命中。元件不呼叫 warmSession、不發送訊息、不自動保持快取有效。費用回報是引擎會計數字，不等於 Pro／Max 等訂閱方案的實際扣款；進行中回合未必已包含在回報中。
 
@@ -39,11 +41,11 @@ window.__usageViewerSessionMeter?.dispose()
 
 ## 資料與適用範圍
 
-只使用已觀測的 `/epitaxy/local_<UUID>` 路徑以及 `claude.web.LocalSessions.getSession`、`getTranscript`、`onOnEvent`。每次資料讀取都核對目前 session ID；切換 session 後，舊非同步回應不能覆寫新資料。紀錄只在本機程序中用來計算彙總，不將對話內容上傳到其他服務，也不新增對話內容檔；只有上述視窗與版本中繼資料另行回報給本機 bridge。
+只使用已觀測的 `/epitaxy/local_<UUID>` 路徑以及 `claude.web.LocalSessions.getSession`、`getTranscript`、`onOnEvent`。每次資料讀取都核對目前 session ID；切換 session 後，舊非同步回應不能覆寫新資料。紀錄只在本機程序中用來計算彙總，不將對話內容上傳到其他服務，也不新增對話內容檔；視窗與版本中繼資料另行回報給本機 bridge，子代理的計價欄位由同一個 bridge 唯讀提供。
 
-目前支援 Desktop Code，包含該介面已能讀取 transcript 的 SSH session。一般 Chat、Cowork，以及存在多個模型選擇器的分割畫面不顯示。若應用程式標記 transcript 不完整，明細會提示統計可能只涵蓋部分紀錄。子代理的獨立 transcript 不另外抓取與加總。
+目前支援 Desktop Code，包含該介面已能讀取 transcript 的 SSH session。一般 Chat、Cowork，以及存在多個模型選擇器的分割畫面不顯示。若應用程式標記 transcript 不完整，明細會提示統計可能只涵蓋部分紀錄。子代理紀錄透過本機 bridge 的 `/claude-subagent-usage?session=<engine UUID>` 讀取：只在 `.claude/projects` 找相符主對話，並以 Agent／Task 的工具呼叫 ID、`.meta.json` 的 `toolUseId`、子紀錄的 session／agent ID 交叉核對。支援同目錄及 `<session>/subagents` 位置，沿已配對呼叫納入下一層子代理，檔名或時間接近不足以配對。bridge 只回傳計價所需的 token、模型與請求識別欄位，不回傳對話內容或路徑，也不另存 transcript。來源缺失、無法唯一配對、格式損壞或 bridge 失效時顯示「部分」，不能把缺失當作零；不支援的模型／計價因素仍顯示費用未提供。
 
-每秒更新倒數，每 15 秒重新讀取統計；收到既有 session 事件時以一秒節流更新。不同串流區塊的同一個 assistant message 會去重。
+每秒更新倒數，每 15 秒重新讀取統計；收到既有 session 事件時以一秒節流更新。不同串流區塊的同一個 assistant message 會去重。Claude 的 `<synthetic>` 系統訊息若明確回報所有 token 與工具使用量為零，會排除於請求計數與計價之外，避免用量上限錯誤訊息使整個 session 的費用變成未知；缺少用量欄位或非零用量仍保留未知判定。
 
 ## 測試與價格來源
 

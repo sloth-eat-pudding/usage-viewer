@@ -4,7 +4,8 @@
 
 ## 帳號與視窗
 
-1. 讀取預設 Claude、MSIX Claude，以及 `claude-custom-source.json` 中的使用量歷史檔。
+1. 讀取預設 Claude、`%LOCALAPPDATA%\Claude-Data\claude_<package-family>` 中新版 MSIX Claude，以及 `claude-custom-source.json` 中的使用量歷史檔。
+   同一 package family 優先使用 `Claude-Data`；舊版 `Packages\Claude_*\LocalCache\Roaming\Claude` 仍可讀取。搬移後保留原來源名稱與群組，Developer Mode 設定也從新 profile 讀取。
 2. 從各檔案最新的 sample 取得 organization ID，保留其 profile 對應關係。
 3. 讀取 Claude 主程序的 `--user-data-dir`，以完整 profile 路徑配對。Self 的 organization 只送給 Self 的視窗，排除 renderer 子程序。
 4. 若自訂 profile 只剩背景程序，重新啟動同一個 `Claude.exe --user-data-dir="..."`，讓 Electron 恢復既有工作階段的視窗。這不會終止 Claude。

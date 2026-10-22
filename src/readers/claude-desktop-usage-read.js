@@ -32,15 +32,28 @@ function findPlanUsageHistoryFiles() {
   const appDataFile = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Claude', 'plan-usage-history.json')
   if (fs.existsSync(appDataFile)) regularFiles.push(appDataFile)
   const packageFiles = []
+  const migratedFamilies = new Set()
+  const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+  const dataRoot = path.join(localAppData, 'Claude-Data')
+  try {
+    for (const entry of fs.readdirSync(dataRoot, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory() || !/^claude_/i.test(entry.name)) continue
+      const file = path.join(dataRoot, entry.name, 'plan-usage-history.json')
+      if (fs.existsSync(file)) {
+        packageFiles.push(file)
+        migratedFamilies.add(entry.name.toLowerCase())
+      }
+    }
+  } catch {}
   const packages = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Packages')
   try {
     for (const entry of fs.readdirSync(packages, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !/^Claude_/i.test(entry.name)) continue
+      if (!entry.isDirectory() || !/^Claude_/i.test(entry.name) || migratedFamilies.has(entry.name.toLowerCase())) continue
       const file = path.join(packages, entry.name, 'LocalCache', 'Roaming', 'Claude', 'plan-usage-history.json')
       if (fs.existsSync(file)) packageFiles.push(file)
     }
   } catch {}
-  const detected = regularFiles.concat(packageFiles.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs))
+  const detected = regularFiles.concat(packageFiles.sort((a, b) => path.relative(localAppData, a).split(path.sep)[1].toLowerCase().localeCompare(path.relative(localAppData, b).split(path.sep)[1].toLowerCase())))
   if (detected.length) return detected
   // Recover only explicitly mapped profiles, never the newest arbitrary API account.
   return readProfileMappings().map(source => source.path)

@@ -9,7 +9,7 @@
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict'
 
-  const VERSION = '1.1.0'
+  const VERSION = '1.2.0'
   const KEY = '__usageViewerSessionMeter'
   const PRICING_DATE = '2026-10-21'
   const PRICING_URL = 'https://platform.claude.com/docs/en/about-claude/pricing'
@@ -66,6 +66,13 @@
       if (!row || typeof row !== 'object' || row.isSidechain) continue
       const usage = row.message?.usage
       if (row.type === 'assistant' && usage && typeof usage === 'object') {
+        // Desktop emits synthetic assistant rows for errors such as quota
+        // limits. Explicitly empty usage is not an unpriced model request.
+        if (row.message.model === '<synthetic>' &&
+            ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']
+              .every(key => number(usage[key]) === 0) &&
+            Object.values(usage.cache_creation || {}).every(value => number(value) === 0) &&
+            Object.values(usage.server_tool_use || {}).every(value => number(value) === 0)) continue
         const id = row.message.id || row.requestId || row.uuid
         // Rows without any stable identity cannot safely be deduplicated.
         if (!id) continue
@@ -144,6 +151,66 @@
     return match ? match[1] : null
   }
 
+  function combineUsage(rows, session, payload, engineId, now = Date.now()) {
+    const main = summarize(rows, session, now)
+    const identity = row => row.message?.id || row.requestId || row.uuid
+    const messageOwners = new Map(rows.filter(r => !r.isSidechain && r.type === 'assistant')
+      .map(r => identity(r)).filter(Boolean).map(id => [id, 'main']))
+    const agents = new Map()
+    let complete = payload?.session_id === engineId && payload.complete === true
+    for (const agent of payload?.session_id === engineId && Array.isArray(payload.agents) ? payload.agents : []) {
+      if (!/^[a-z0-9-]+$/i.test(agent.id || '') || !Array.isArray(agent.rows)) { complete = false; continue }
+      const current = agents.get(agent.id) || []
+      for (const row of agent.rows) {
+        const key = identity(row)
+        if (!key) { complete = false; continue }
+        if (messageOwners.has(key) && messageOwners.get(key) !== agent.id) continue
+        messageOwners.set(key, agent.id) // Copies across parent/children are billed once.
+        current.push({ ...row, sessionId: `${engineId}:${agent.id}`, isSidechain: false })
+      }
+      agents.set(agent.id, current)
+    }
+    const summaries = [...agents.values()].map(agentRows => summarize(agentRows, {}, now))
+    const totals = { ...main.totals }
+    for (const agent of summaries) for (const key of Object.keys(totals)) totals[key] += agent.totals[key]
+    const inputTotal = totals.input + totals.cacheRead + totals.cacheWrite
+    const agentEstimates = summaries.map(item => item.requests === 0 ? 0 : item.cost.estimateUsd)
+    const estimates = [main.cost.estimateUsd, ...agentEstimates]
+    return {
+      ...main, main, totals, requests: main.requests + summaries.reduce((n, a) => n + a.requests, 0),
+      hitRate: inputTotal > 0 ? totals.cacheRead / inputTotal * 100 : null,
+      cost: { ...main.cost, reportedUsd: null, estimateUsd: estimates.every(value => value !== null)
+        ? estimates.reduce((sum, value) => sum + value, 0) : null },
+      subagents: { count: summaries.length, complete, missing: payload?.missing || 0,
+        requests: summaries.reduce((n, a) => n + a.requests, 0),
+        estimateUsd: agentEstimates.every(value => value !== null)
+          ? agentEstimates.reduce((sum, value) => sum + value, 0) : null },
+      partial: main.partial || !complete
+    }
+  }
+
+  async function readSessionUsage(win, rows, session) {
+    const hasAgents = rows.some(row => Array.isArray(row.message?.content) && row.message.content.some(
+      block => block.type === 'tool_use' && ['Agent', 'Task'].includes(block.name)))
+    if (!hasAgents) return summarize(rows, session)
+    const ids = [...new Set(rows.filter(r => !r.isSidechain).map(r => r.sessionId)
+      .filter(id => typeof id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)))]
+    const engineId = ids.length === 1 ? ids[0] : null
+    let payload = null, timeout
+    if (engineId && typeof win.fetch === 'function') {
+      const abort = new win.AbortController()
+      try {
+        timeout = win.setTimeout(() => abort.abort(), 5000)
+        const response = await win.fetch('http://127.0.0.1:8765/claude-subagent-usage?session=' + encodeURIComponent(engineId),
+          { signal: abort.signal, cache: 'no-store' })
+        if (!response.ok) throw new Error('子代理用量無法讀取')
+        payload = await response.json()
+      } catch { /* Keep available usage, visibly marked incomplete. */ }
+      finally { win.clearTimeout(timeout) }
+    }
+    return combineUsage(rows, session, payload, engineId)
+  }
+
   function countdown(expiry, now) {
     const seconds = Math.max(0, Math.ceil((expiry - now) / 1000))
     return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
@@ -157,11 +224,12 @@
       : metrics.cache.observedAt === null ? '未觀測快取' : 'TTL 未提供'
     const reported = metrics.cost.reportedUsd
     const estimate = metrics.cost.estimateUsd
+    const costSuffix = metrics.subagents ? (metrics.subagents.complete ? ' 合計' : ' 部分') : ''
     return {
       cache: `快取 ${cache}`,
       hit: metrics.hitRate === null ? '命中 —' : `命中 ${metrics.hitRate.toFixed(1)}%`,
       cost: reported !== null ? `US$${reported.toFixed(2)} 回報${metrics.cost.resetDetected ? '·本段' : ''}` :
-        estimate !== null ? `≈US$${estimate.toFixed(2)}` : '費用 未提供'
+        estimate !== null ? `≈US$${estimate.toFixed(2)}${costSuffix}` : '費用 未提供'
     }
   }
 
@@ -169,8 +237,9 @@
     if (!metrics) return '等待目前 session 的用量資料。'
     const n = value => value.toLocaleString('en-US')
     return [
-      '此 session 的可見主對話紀錄；子代理紀錄未重複加總。',
-      '快取倒數為最後一次使用時間 + 已觀測 TTL 的推估；不保證下一次請求命中，也不會自動發送保溫請求。',
+      metrics.subagents ? `主對話 + ${n(metrics.subagents.count)} 個子代理的用量合計；相同請求去重。` : '此 session 的可見主對話紀錄。',
+      '快取倒數只顯示主對話，為最後一次使用時間 + 已觀測 TTL 的推估；不保證命中，也不會自動保溫。',
+      metrics.subagents ? `主對話估算 ${metrics.main.cost.estimateUsd === null ? '未提供' : 'US$' + metrics.main.cost.estimateUsd.toFixed(2)} · 子代理估算 ${metrics.subagents.estimateUsd === null ? '未提供' : 'US$' + metrics.subagents.estimateUsd.toFixed(2)}` : '',
       `輸入 ${n(metrics.totals.input)} · 輸出 ${n(metrics.totals.output)}`,
       `Cache read ${n(metrics.totals.cacheRead)} · write ${n(metrics.totals.cacheWrite)}`,
       `5m write ${n(metrics.totals.write5m)} · 1h write ${n(metrics.totals.write1h)}`,
@@ -179,6 +248,7 @@
         ? '費用採最近完成回合的 total_cost_usd 累計回報，尚未包含進行中回合；不是訂閱方案的實際扣款。'
         : `費用依 ${PRICING_DATE} 官方 API 單價推估，非帳單；未知模型、費率或 TTL 不估算。`,
       metrics.cost.resetDetected ? '偵測到引擎累計值下降：顯示最新累計段，未把多段累計值相加。' : '',
+      metrics.subagents && !metrics.subagents.complete ? `子代理紀錄未完整取得（未配對 ${n(metrics.subagents.missing)} 筆），目前僅為可讀取用量的小計。` : '',
       metrics.partial ? '注意：應用程式標記紀錄不完整，token 統計可能只涵蓋部分紀錄。' : ''
     ].filter(Boolean).join('\n')
   }
@@ -273,7 +343,9 @@
         ])
         if (state.disposed || revision !== state.revision) return
         if (!session || session.sessionId !== id) throw new Error('session 對應不符')
-        state.metrics = summarize(rows, session)
+        const metrics = await readSessionUsage(win, rows, session)
+        if (state.disposed || revision !== state.revision) return
+        state.metrics = metrics
         state.error = null
       } catch (error) {
         if (!state.disposed && revision === state.revision) state.error = error.message
@@ -345,5 +417,5 @@
     return controller
   }
 
-  return { VERSION, PRICING_DATE, PRICING_URL, summarize, estimateCost, labels, details, sessionId, install }
+  return { VERSION, PRICING_DATE, PRICING_URL, summarize, combineUsage, readSessionUsage, estimateCost, labels, details, sessionId, install }
 })

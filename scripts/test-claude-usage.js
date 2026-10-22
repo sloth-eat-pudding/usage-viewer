@@ -67,15 +67,25 @@ async function testHttpBridge() {
   await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve))
   const port = reservation.address().port
   await new Promise(resolve => reservation.close(resolve))
+  const claudeHome = path.join(path.dirname(process.argv[2]), 'claude-test-home')
+  const project = path.join(claudeHome, 'projects', 'test-project')
+  fs.mkdirSync(project, { recursive: true })
+  const session = '33333333-3333-3333-3333-333333333333'
+  fs.writeFileSync(path.join(project, session + '.jsonl'), JSON.stringify({ sessionId: session,
+    message: { content: [{ type: 'tool_use', name: 'Agent', id: 'call-1' }] } }))
+  fs.writeFileSync(path.join(project, 'agent-a1.meta.json'), JSON.stringify({ toolUseId: 'call-1' }))
+  fs.writeFileSync(path.join(project, 'agent-a1.jsonl'), JSON.stringify({ sessionId: session, agentId: 'a1', type: 'assistant',
+    message: { id: 'msg-1', model: 'claude-opus-5-5', content: 'PRIVATE CONTENT', usage: { input_tokens: 1, output_tokens: 2 } } }))
   const child = spawn(process.execPath, [path.join(__dirname, '../src/readers/claude-desktop-usage-bridge.js')], {
-    env: { ...process.env, USAGE_VIEWER_HOME: path.dirname(process.argv[2]), CLAUDE_DESKTOP_USAGE_BRIDGE_PORT: String(port) },
+    env: { ...process.env, CLAUDE_HOME: claudeHome, USAGE_VIEWER_HOME: path.dirname(process.argv[2]), CLAUDE_DESKTOP_USAGE_BRIDGE_PORT: String(port) },
     stdio: 'ignore'
   })
-  function request(endpoint, body) {
+  function request(endpoint, body, origin = 'https://claude.ai', json = false) {
     return new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port, path: endpoint, method: body ? 'POST' : 'GET',
-        headers: { Origin: 'https://claude.ai', 'Content-Type': 'application/json' }, timeout: 1000 }, res => {
-        res.resume(); res.on('end', () => resolve(res.statusCode))
+        headers: { Origin: origin, 'Content-Type': 'application/json' }, timeout: 1000 }, res => {
+        let text = ''; res.on('data', chunk => { text += chunk });
+        res.on('end', () => resolve(json ? { status: res.statusCode, body: JSON.parse(text) } : res.statusCode))
       })
       req.on('error', reject); req.on('timeout', () => req.destroy(new Error('request timeout')))
       req.end(body ? JSON.stringify(body) : undefined)
@@ -89,6 +99,16 @@ async function testHttpBridge() {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
     assert.equal(ready, true, 'Bridge must start')
+    const accounting = await request('/claude-subagent-usage?session=' + session, null, 'https://claude.ai', true)
+    assert.equal(accounting.status, 200)
+    assert.equal(accounting.body.complete, true)
+    assert.equal(accounting.body.agents.length, 1)
+    assert.equal(JSON.stringify(accounting).includes('PRIVATE CONTENT'), false)
+    assert.equal(await request('/claude-subagent-usage?session=' + session, null, 'https://evil.example'), 403)
+    assert.equal(await request('/claude-subagent-usage?session=../test'), 400)
+    const absent = await request('/claude-subagent-usage?session=44444444-4444-4444-4444-444444444444', null, 'https://claude.ai', true)
+    assert.equal(absent.body.complete, false)
+    assert.equal(absent.body.agents.length, 0)
     const org = '11111111-1111-1111-1111-111111111111'
     const refreshId = '22222222-2222-2222-2222-222222222222'
     const endpoint = `/claude-desktop-usage?org=${org}&refresh_id=${refreshId}`

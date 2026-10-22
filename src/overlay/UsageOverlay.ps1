@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "..\..\scripts\claude-desktop-profiles.ps1")
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -192,28 +193,15 @@ function ConvertTo-SourceAbbreviation {
   return $abbreviation
 }
 function Get-ClaudeDesktopSources {
-  $result = @()
-  $regular = Join-Path $env:APPDATA "Claude\plan-usage-history.json"
-  if (Test-Path -LiteralPath $regular) { $result += [pscustomobject]@{ name = "Claude Desktop (AppData)"; path = $regular; group = "1" } }
-  $packages = Join-Path $env:LOCALAPPDATA "Packages"
-  if (Test-Path -LiteralPath $packages) {
-    try {
-      $result += @(Get-ChildItem -LiteralPath $packages -Directory -Filter "Claude_*" |
-        ForEach-Object { Join-Path $_.FullName "LocalCache\Roaming\Claude\plan-usage-history.json" } |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        Sort-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc -as [datetime] } -Descending |
-        ForEach-Object -Begin { $index = 0 } -Process { $index++; [pscustomobject]@{ name = "Claude Desktop (MSIX $index)"; path = $_; group = [string]($index + 1) } })
-    } catch { }
-  }
-  return @($result)
+  return @(Get-ClaudeDesktopProfiles)
 }
 $detectedClaudeDesktopSources = Get-ClaudeDesktopSources
 if ($detectedClaudeDesktopSources.Count -gt 0) {
   $savedDesktopSources = @($script:ClaudeDesktopSources)
   $script:ClaudeDesktopSources = @($detectedClaudeDesktopSources | ForEach-Object {
     $current = $_
-    $saved = $savedDesktopSources | Where-Object { [string]$_.path -ieq [string]$current.path } | Select-Object -First 1
-    if ($null -ne $saved) { $current.group = Convert-GroupCode ([string]$saved.group) }
+    $saved = $savedDesktopSources | Where-Object { ([string]$_.path -ieq [string]$current.path -or [string]$_.path -ieq [string]$current.legacy_path) } | Select-Object -First 1
+    if ($null -ne $saved) { $current.group = Convert-GroupCode ([string]$saved.group); $current.name = [string]$saved.name }
     elseif ($current.name -eq "Claude Desktop (AppData)") { $current.group = Convert-GroupCode $script:ClaudeDesktopGroup }
     $current
   })
@@ -624,6 +612,7 @@ function Update-UsageView {
 function Read-ClaudePlanUsageJson {
   param([string]$Path)
   if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+  $Path = Resolve-ClaudeDesktopHistoryPath $Path
   try {
     $sample = $null
     if (Test-Path -LiteralPath $Path) {

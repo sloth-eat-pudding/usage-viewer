@@ -92,24 +92,14 @@ public partial class MainWindow : Window
             new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"Custom {index + 1}" : source.Name, "Claude"),
                 source.Group, Read($"claude-custom-{index}-latest.json")))).ToList();
 
-    private static IReadOnlyList<ConfiguredSource> ClaudeDesktopSources()
-    {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var regular = Path.Combine(appData, "Claude", "plan-usage-history.json");
-        var result = new List<ConfiguredSource>();
-        if (File.Exists(regular)) result.Add(new ConfiguredSource("Claude Desktop (AppData)", regular, "1"));
-        try
+    private IReadOnlyList<ConfiguredSource> ClaudeDesktopSources() =>
+        ClaudeDesktopProfiles.Find().Select(profile =>
         {
-            var packages = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Packages");
-            if (Directory.Exists(packages))
-                result.AddRange(Directory.EnumerateDirectories(packages, "Claude_*")
-                    .Select(path => Path.Combine(path, "LocalCache", "Roaming", "Claude", "plan-usage-history.json"))
-                    .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc)
-                    .Select((path, index) => new ConfiguredSource($"Claude Desktop (MSIX {index + 1})", path, (index + 2).ToString(CultureInfo.InvariantCulture))));
-        }
-        catch { }
-        return result;
-    }
+            var saved = _displaySettings.ClaudeDesktopSources.FirstOrDefault(source =>
+                source.Path.Equals(profile.Path, StringComparison.OrdinalIgnoreCase) ||
+                source.Path.Equals(profile.LegacyPath, StringComparison.OrdinalIgnoreCase));
+            return new ConfiguredSource(saved?.Name ?? profile.Name, profile.Path, saved?.Group ?? profile.Group);
+        }).ToList();
 
     private List<UsageSource> CodexSources() => new[]
     {

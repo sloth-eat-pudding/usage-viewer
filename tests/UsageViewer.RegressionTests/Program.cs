@@ -3,6 +3,8 @@ using UsageViewer;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Claude packaged profile migration and legacy discovery", ClaudeProfiles),
+    ("Claude subagent linkage, metadata minimization and missing data", ClaudeSubagents),
     ("Shared Claude API contract", ContractFixtures),
     ("Window heartbeat validation and metadata minimization", MeterHeartbeat),
     ("Claude account isolation, zero usage, stale and malformed snapshots", ClaudeSnapshots),
@@ -21,6 +23,54 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failed}/{tests.Length} regression groups passed.");
 return failed == 0 ? 0 : 1;
+
+static void ClaudeProfiles()
+{
+    using var workspace = new Workspace();
+    var roaming = Path.Combine(workspace.Root, "roaming");
+    var local = Path.Combine(workspace.Root, "local");
+    var regular = Path.Combine(roaming, "Claude", "plan-usage-history.json");
+    var legacy = Path.Combine(local, "Packages", "Claude_test", "LocalCache", "Roaming", "Claude", "plan-usage-history.json");
+    var migrated = Path.Combine(local, "Claude-Data", "claude_test", "plan-usage-history.json");
+    foreach (var file in new[] { regular, legacy, migrated })
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, "{\"samples\":[]}");
+    }
+    var profiles = ClaudeDesktopProfiles.Find(roaming, local);
+    Equal(2, profiles.Count, "One source per package family, plus regular install");
+    Equal(migrated, profiles[1].Path, "Prefer migrated data");
+    Equal(true, legacy.Equals(profiles[1].LegacyPath, StringComparison.OrdinalIgnoreCase), "Preserve legacy identity");
+    File.Delete(migrated);
+    Equal(legacy, ClaudeDesktopProfiles.Find(roaming, local)[1].Path, "Legacy install still works");
+    File.Delete(legacy);
+    Equal(regular, ClaudeDesktopProfiles.Find(roaming, local).Single().Path, "Keep regular install when Packages is present");
+}
+
+static void ClaudeSubagents()
+{
+    using var workspace = new Workspace();
+    var project = Path.Combine(workspace.Root, "project");
+    Directory.CreateDirectory(project);
+    var id = Id(1);
+    File.WriteAllText(Path.Combine(project, id + ".jsonl"), JsonSerializer.Serialize(new { sessionId = id,
+        message = new { content = new[] { new { type = "tool_use", name = "Agent", id = "call-1" } } } }));
+    File.WriteAllText(Path.Combine(project, "agent-a1.meta.json"), "{\"toolUseId\":\"call-1\"}");
+    var childFile = Path.Combine(project, "agent-a1.jsonl");
+    File.WriteAllText(childFile, JsonSerializer.Serialize(new { sessionId = id, agentId = "a1", type = "assistant",
+        message = new { id = "msg-1", model = "claude-opus-5-5", content = "PRIVATE CONTENT", usage = new { input_tokens = 1, output_tokens = 2 } } }));
+    var result = JsonSerializer.SerializeToElement(ClaudeSubagentUsage.Read(id, workspace.Root));
+    Equal(true, result.GetProperty("complete").GetBoolean(), "Exact tool call linkage");
+    Equal(1, result.GetProperty("agents").GetArrayLength(), "One matched agent");
+    Equal(false, result.ToString().Contains("PRIVATE CONTENT"), "Only accounting fields leave the reader");
+    File.WriteAllText(childFile, JsonSerializer.Serialize(new { sessionId = Id(2), agentId = "a1" }));
+    result = JsonSerializer.SerializeToElement(ClaudeSubagentUsage.Read(id, workspace.Root));
+    Equal(false, result.GetProperty("complete").GetBoolean(), "Wrong parent must be incomplete");
+    Equal(0, result.GetProperty("agents").GetArrayLength(), "Never borrow another session's agent");
+    File.Delete(childFile);
+    result = JsonSerializer.SerializeToElement(ClaudeSubagentUsage.Read(id, workspace.Root));
+    Equal(1, result.GetProperty("missing").GetInt32(), "Missing agent is not counted as zero usage");
+}
 
 static void MeterHeartbeat()
 {

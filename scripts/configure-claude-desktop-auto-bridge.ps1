@@ -1,6 +1,7 @@
 param([switch]$Disable)
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'claude-desktop-profiles.ps1')
 $usageHome = if ([string]::IsNullOrWhiteSpace($env:USAGE_VIEWER_HOME)) {
   Join-Path $env:USERPROFILE '.usage-viewer'
 } else {
@@ -43,6 +44,7 @@ if (Test-Path -LiteralPath $packagesRoot) {
   $settingsFiles += @(Get-ChildItem -LiteralPath $packagesRoot -Directory -Filter 'Claude_*' |
     ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude\developer_settings.json' })
 }
+$settingsFiles += @(Get-ClaudeDesktopProfiles | ForEach-Object { Join-Path (Split-Path -Parent $_.path) 'developer_settings.json' })
 foreach ($settingsFile in $settingsFiles) {
   try {
     if ((Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json).allowDevTools -eq $true) {
