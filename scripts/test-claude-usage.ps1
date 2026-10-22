@@ -86,7 +86,29 @@ try {
   $target.IsDefault = $true; $target.Profile = 'C:\default'
   Assert-True ((Get-TargetWindow $target $processes $windows).ProcessId -eq 1) 'Default account must not target Self'
   Assert-True ((Get-RetryDelaySeconds 1) -eq 30) 'First retry must be prompt'
-  Assert-True ((Get-RetryDelaySeconds 1000) -eq 600) 'Recovery must keep retrying with a bounded delay'
+  Assert-True ((Get-RetryDelaySeconds 1000) -eq 120) 'Recovery must retry before another five-minute display expiry'
+  $retryStates = @{}
+  $firstWindow = [pscustomobject]@{ ProcessId = 1; Handle = 100 }
+  $retryState = Get-ClaudeRetryState $retryStates 'profile|organization' $firstWindow
+  $retryState.Failures = 4; $retryState.NextAttempt = [DateTimeOffset]::UtcNow.AddMinutes(2)
+  Assert-True ((Get-ClaudeRetryState $retryStates 'profile|organization' $firstWindow).Failures -eq 4) 'The same window must retain its backoff'
+  Assert-True ((Get-ClaudeRetryState $retryStates 'profile|organization' $null).Failures -eq 4) 'A temporarily missing window must not spin retries'
+  $restartedWindow = [pscustomobject]@{ ProcessId = 2; Handle = 200 }
+  $retryState = Get-ClaudeRetryState $retryStates 'profile|organization' $restartedWindow
+  Assert-True ($retryState.Failures -eq 0 -and $retryState.NextAttempt -eq [DateTimeOffset]::MinValue) 'Restarted Claude must recover immediately without inheriting the old cooldown'
+  $tools = @(
+    [pscustomobject]@{ ProcessId = 1; Handle = 101; Cloaked = $false; Title = 'DevTools - file:///main_window/index.html' },
+    [pscustomobject]@{ ProcessId = 1; Handle = 102; Cloaked = $false; Title = 'Developer Tools - https://claude.ai/epitaxy?coldLaunch=1' },
+    [pscustomobject]@{ ProcessId = 2; Handle = 201; Cloaked = $false; Title = 'Developer Tools - https://claude.ai/epitaxy' }
+  )
+  Assert-True ((Get-ClaudeWebDevTools $firstWindow $tools).Handle -eq 102) 'Reuse the existing Claude web DevTools, excluding the wrapper and the other account'
+  Assert-True ($null -eq (Get-ClaudeWebDevTools $firstWindow @($tools[0], $tools[2]))) 'Another renderer is not a matching web console'
+  $tools[1].Cloaked = $true
+  Assert-True ($null -eq (Get-ClaudeWebDevTools $firstWindow $tools)) 'A cloaked console must not receive keyboard input'
+  $tools[1].Cloaked = $false
+  $ambiguousRejected = $false
+  try { Get-ClaudeWebDevTools $firstWindow @($tools[1], $tools[1]) | Out-Null } catch { $ambiguousRejected = $true }
+  Assert-True $ambiguousRejected 'Multiple web DevTools must not select an arbitrary renderer'
   $meterWindows = @(
     [pscustomobject]@{ Handle = 1001; ProcessId = 1; Cloaked = $false; Title = 'Claude'; Area = 900000 },
     [pscustomobject]@{ Handle = 1002; ProcessId = 2; Cloaked = $false; Title = 'Claude'; Area = 800000 },
@@ -109,8 +131,19 @@ try {
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002')) 'A reloaded page stops heartbeats and must be reinjected'
   # Compile the actual Win32 helper without calling its input methods.
   $source = Get-Content $scriptPath -Raw
-  $native = [regex]::Match($source, "(?s)Add-Type @'\r?\n(.*?)\r?\n'@").Groups[1].Value
-  Add-Type $native
+  $native = [regex]::Match($source, "(?s)Add-Type -ReferencedAssemblies \u0024nativeReferences @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+  Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase
+  $nativeReferences = @('System.dll', 'System.Core.dll',
+    [Windows.Automation.AutomationElement].Assembly.Location,
+    [Windows.Automation.AutomationPattern].Assembly.Location,
+    [Windows.DependencyObject].Assembly.Location)
+  Add-Type -ReferencedAssemblies $nativeReferences $native
+  Assert-True ([ClaudeUsageInjectorNative]::IsEmptyConsoleText("`r`n")) 'A blank Console prompt may be reused'
+  Assert-True (-not [ClaudeUsageInjectorNative]::IsEmptyConsoleText('user draft')) 'Existing console input must be preserved'
+  Assert-True (-not [ClaudeUsageInjectorNative]::IsEmptyConsoleText([NullString]::Value)) 'An unreadable Console prompt must not be treated as empty'
+  Assert-True (Test-ConsoleScriptText "line1`r`nline2`r`n" "line1`nline2") 'Clipboard verification must compare the entire multiline script across Windows newline formats'
+  Assert-True (-not (Test-ConsoleScriptText 'line2' "line1`nline2")) 'Visible CodeMirror lines alone must not acknowledge the whole script'
+  Assert-True (-not (Test-ConsoleScriptText 'UsageViewer-copy-sentinel' 'script')) 'A failed clipboard copy must not validate the previous paste'
   $meterPath = Join-Path $PSScriptRoot '..\src\desktop-addon\claude-session-meter.js'
   $injection = New-InjectionScript @($organization) -SessionMeterPath $meterPath
   Assert-True ($injection.Contains('__usageViewerSessionMeter')) 'The Desktop session meter must be bundled with the bridge payload'

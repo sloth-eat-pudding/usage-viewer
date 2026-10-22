@@ -31,22 +31,33 @@ New-Item -ItemType Directory -Path $usageHome -Force | Out-Null
 
 function Write-InjectorLog {
   param([string]$Message)
-  try {
-    Add-Content -LiteralPath $logFile -Value "$([DateTimeOffset]::UtcNow.ToString('O')) pid=$PID $Message" -Encoding UTF8
-  } catch { } # Logging must never stop account recovery.
+  $line = "$([DateTimeOffset]::UtcNow.ToString('O')) pid=$PID $Message" + [Environment]::NewLine
+  # Supervisor/worker writes and readers can briefly contend for this file.
+  # Retry the short append instead of silently losing the failure reason.
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      [IO.File]::AppendAllText($logFile, $line, [Text.UTF8Encoding]::new($false))
+      return
+    } catch { Start-Sleep -Milliseconds 50 }
+  } # Logging must never stop account recovery.
 }
 
 Write-InjectorLog 'native helper loading'
 
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes, WindowsBase
+$nativeReferences = @('System.dll', 'System.Core.dll',
+  [Windows.Automation.AutomationElement].Assembly.Location,
+  [Windows.Automation.AutomationPattern].Assembly.Location,
+  [Windows.DependencyObject].Assembly.Location)
 
-Add-Type @'
+Add-Type -ReferencedAssemblies $nativeReferences @'
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using System.Windows.Automation;
 
 public static class ClaudeUsageInjectorNative
 {
@@ -177,6 +188,56 @@ public static class ClaudeUsageInjectorNative
         finally { if (attached) AttachThreadInput(currentThread, foregroundThread, false); }
     }
     public static void Close(long handle) { if (handle != 0) PostMessage(new IntPtr(handle), WM_CLOSE, IntPtr.Zero, IntPtr.Zero); }
+
+    private static AutomationElement ConsolePrompt(long handle)
+    {
+        var root = AutomationElement.FromHandle(new IntPtr(handle));
+        var candidates = root.FindAll(TreeScope.Descendants, new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+            new PropertyCondition(AutomationElement.NameProperty, "Console prompt")));
+        AutomationElement prompt = null;
+        foreach (AutomationElement candidate in candidates)
+        {
+            if (candidate.Current.IsOffscreen || !candidate.Current.IsEnabled) continue;
+            if (prompt != null) throw new InvalidOperationException("More than one Console prompt is visible");
+            prompt = candidate;
+        }
+        return prompt;
+    }
+
+    private static string PromptText(AutomationElement prompt)
+    {
+        if (prompt == null) return null;
+        object pattern;
+        if (prompt.TryGetCurrentPattern(TextPattern.Pattern, out pattern)) return ((TextPattern)pattern).DocumentRange.GetText(-1);
+        if (prompt.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) return ((ValuePattern)pattern).Current.Value;
+        return null;
+    }
+
+    public static bool IsEmptyConsoleText(string text) { return text != null && text.TrimEnd('\r', '\n').Length == 0; }
+
+    public static bool FocusEmptyConsole(long handle)
+    {
+        var prompt = ConsolePrompt(handle);
+        if (prompt == null) return false;
+        prompt.SetFocus();
+        Thread.Sleep(100);
+        prompt = ConsolePrompt(handle);
+        if (!IsEmptyConsoleText(PromptText(prompt))) return false;
+        return true;
+    }
+
+    public static bool FocusConsole(long handle)
+    {
+        var prompt = ConsolePrompt(handle);
+        if (prompt == null) return false;
+        prompt.SetFocus();
+        return true;
+    }
+
+    public static void SelectAll() { SendShortcut(VK_CONTROL, 0x41); }
+    public static void Copy() { SendShortcut(VK_CONTROL, 0x43); }
+    public static void MoveToEnd() { SendShortcut(VK_CONTROL, 0x23); }
 
     public static bool OpenDevToolsFromMenu(long handle)
     {
@@ -476,53 +537,85 @@ $sessionMeterScript
 "@.Trim()
 }
 
+function Get-ClaudeWebDevTools {
+  param([object]$Window, [object[]]$Tools)
+  $matchingTools = @($Tools | Where-Object {
+    $_.ProcessId -eq $Window.ProcessId -and -not $_.Cloaked -and
+    $_.Title -match '^(?:DevTools|Developer Tools)\s*-\s*https://claude\.ai(?:/|$)'
+  })
+  if ($matchingTools.Count -gt 1) { throw 'More than one Claude web DevTools window matches this profile' }
+  if ($matchingTools.Count -eq 1) { return $matchingTools[0] }
+  return $null
+}
+
 function Invoke-ClaudeInjection {
   param([object]$Window, [string[]]$Organizations, [string]$RefreshId, [switch]$MeterOnly)
   $devTools = $null
   $openedDevTools = $false
   $clipboardChanged = $false
   $previousClipboardText = $null
+  $clipboardProbe = ''
+  $pastedText = $null
   try {
-    $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
-      Where-Object { $_.ProcessId -eq $Window.ProcessId } | Select-Object -First 1
-    # Never change a console the user already has open.
-    if ($null -ne $devTools) { throw 'DevTools is already open; deferring to preserve the user console' }
-    if (-not [ClaudeUsageInjectorNative]::Focus($Window.Handle)) { throw 'Could not focus Claude' }
-    [ClaudeUsageInjectorNative]::OpenDevTools()
-    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
-    do {
-      Start-Sleep -Milliseconds 200
-      $devTools = [ClaudeUsageInjectorNative]::FindClaudeWindows($true) |
-        Where-Object { $_.ProcessId -eq $Window.ProcessId } | Select-Object -First 1
-    } while ($null -eq $devTools -and [DateTimeOffset]::UtcNow -lt $deadline)
-    if ($null -eq $devTools) { throw 'DevTools did not open within 5 seconds; check Developer Mode' }
-    $openedDevTools = $true
-    Write-InjectorLog "stage=console process=$($Window.ProcessId)"
+    $existing = @([ClaudeUsageInjectorNative]::FindClaudeWindows($true))
+    $devTools = Get-ClaudeWebDevTools $Window $existing
+    if ($devTools) {
+      # CLAUDE_DEV_TOOLS=undocked opens this window on every Claude launch.
+      # Reuse an empty prompt instead of deferring forever; never close it.
+      $profileWindows = @([ClaudeUsageInjectorNative]::FindClaudeWindows($false) |
+        Where-Object { $_.ProcessId -eq $Window.ProcessId -and -not $_.Cloaked -and $_.Title -and $_.Area -gt 10000 })
+      if ($profileWindows.Count -ne 1) { throw 'Cannot pair existing DevTools with one Claude window' }
+    } else {
+      if (-not [ClaudeUsageInjectorNative]::Focus($Window.Handle)) { throw 'Could not focus Claude' }
+      [ClaudeUsageInjectorNative]::OpenDevTools()
+      $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+      do {
+        Start-Sleep -Milliseconds 200
+        $devTools = Get-ClaudeWebDevTools $Window @([ClaudeUsageInjectorNative]::FindClaudeWindows($true))
+      } while ($null -eq $devTools -and [DateTimeOffset]::UtcNow -lt $deadline)
+      if ($null -eq $devTools) { throw 'Claude web DevTools did not open within 5 seconds; check Developer Mode' }
+      $openedDevTools = $existing.Handle -notcontains $devTools.Handle
+    }
+    Write-InjectorLog "stage=console process=$($Window.ProcessId) reused=$(-not $openedDevTools)"
     if (-not [ClaudeUsageInjectorNative]::Focus($devTools.Handle)) { throw 'Could not focus DevTools' }
     Start-Sleep -Milliseconds 300
-    [ClaudeUsageInjectorNative]::OpenCommandMenu()
-    Start-Sleep -Milliseconds 300
+    # Select the Console panel directly. A command menu/drawer can focus the
+    # filter or another panel and previously accepted the paste unnoticed.
+    [ClaudeUsageInjectorNative]::ShowConsolePanel()
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(5)
+    $promptReady = $false
+    do {
+      Start-Sleep -Milliseconds 200
+      if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before console selection' }
+      $promptReady = [ClaudeUsageInjectorNative]::FocusEmptyConsole($devTools.Handle)
+    } while (-not $promptReady -and [DateTimeOffset]::UtcNow -lt $deadline)
+    if (-not $promptReady) { throw 'Console prompt is unavailable or contains a draft; leaving it unchanged' }
     # Capture only text, avoiding delayed IDataObject enumeration that hung
     # the former long-running updater. This worker has an external timeout.
     if ([Windows.Forms.Clipboard]::ContainsText()) { $previousClipboardText = [Windows.Forms.Clipboard]::GetText() }
-    [Windows.Forms.Clipboard]::SetText('Show Console')
-    $clipboardChanged = $true
-    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before console selection' }
-    [ClaudeUsageInjectorNative]::Paste()
-    Start-Sleep -Milliseconds 300
-    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before console selection submission' }
-    [ClaudeUsageInjectorNative]::Execute()
-    Start-Sleep -Milliseconds 1200
-    [ClaudeUsageInjectorNative]::OpenConsole()
-    Start-Sleep -Milliseconds 400
     # Paste the complete script at once; do not type it character by character.
     $script = New-InjectionScript $Organizations $RefreshId -WindowKey "$($Window.ProcessId)-$($Window.Handle)" -MeterOnly:$MeterOnly
     [Windows.Forms.Clipboard]::SetText($script)
+    $clipboardChanged = $true
     Write-InjectorLog "stage=paste process=$($Window.ProcessId) characters=$($script.Length)"
     if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before script paste' }
+    if (-not [ClaudeUsageInjectorNative]::FocusEmptyConsole($devTools.Handle)) { throw 'Console prompt changed before script paste' }
     [ClaudeUsageInjectorNative]::Paste()
     Start-Sleep -Milliseconds 500
     if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed before script submission' }
+    # CodeMirror exposes only its visible lines through UI Automation. Copy
+    # the focused prompt to verify all lines, using a sentinel so a failed
+    # copy cannot accidentally validate the clipboard used for the paste.
+    $clipboardProbe = 'UsageViewer-copy-' + [guid]::NewGuid().ToString()
+    [Windows.Forms.Clipboard]::SetText($clipboardProbe)
+    if (-not [ClaudeUsageInjectorNative]::FocusConsole($devTools.Handle)) { throw 'Console prompt disappeared after paste' }
+    [ClaudeUsageInjectorNative]::SelectAll()
+    [ClaudeUsageInjectorNative]::Copy()
+    Start-Sleep -Milliseconds 200
+    $pastedText = [Windows.Forms.Clipboard]::GetText()
+    [ClaudeUsageInjectorNative]::MoveToEnd()
+    if (-not (Test-ConsoleScriptText $pastedText $script)) { throw 'Console did not accept the complete script; not executing' }
+    if ([ClaudeUsageInjectorNative]::ForegroundWindow() -ne $devTools.Handle) { throw 'Focus changed during script verification' }
     [ClaudeUsageInjectorNative]::Execute()
     Write-InjectorLog "stage=submitted process=$($Window.ProcessId)"
     # Submission is not success. The supervisor waits for a new API observation.
@@ -537,7 +630,7 @@ function Invoke-ClaudeInjection {
     try {
       if ($clipboardChanged -and $null -ne $previousClipboardText) {
         $currentText = [Windows.Forms.Clipboard]::GetText()
-        if ($currentText -eq 'Show Console' -or ($script -and $currentText -eq $script)) {
+        if (($script -and $currentText -eq $script) -or $currentText -eq $clipboardProbe -or ($pastedText -and $currentText -eq $pastedText)) {
           [Windows.Forms.Clipboard]::SetText($previousClipboardText)
         }
       }
@@ -547,6 +640,12 @@ function Invoke-ClaudeInjection {
       Start-Sleep -Milliseconds 150
     }
   }
+}
+
+function Test-ConsoleScriptText {
+  param([string]$Actual, [string]$Expected)
+  return $Expected.Length -gt 0 -and $Actual.Replace("`r`n", "`n").TrimEnd("`r`n".ToCharArray()) -ceq
+    $Expected.Replace("`r`n", "`n").TrimEnd("`r`n".ToCharArray())
 }
 
 if ($WorkerProcessId -gt 0) {
@@ -650,7 +749,16 @@ function Get-TargetWindow {
 
 function Get-RetryDelaySeconds {
   param([int]$Failures)
-  return @(30, 60, 180, 600)[[Math]::Min([Math]::Max($Failures - 1, 0), 3)]
+  return @(30, 60, 120)[[Math]::Min([Math]::Max($Failures - 1, 0), 2)]
+}
+
+function Get-ClaudeRetryState {
+  param([hashtable]$States, [string]$Key, [object]$Window)
+  $instance = if ($Window) { "$($Window.ProcessId)-$($Window.Handle)" } else { '' }
+  if (-not $States.ContainsKey($Key) -or ($instance -and $States[$Key].Instance -ne $instance)) {
+    $States[$Key] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue; Instance = $instance }
+  }
+  return $States[$Key]
 }
 
 function Invoke-BoundedInjection {
@@ -661,12 +769,17 @@ function Invoke-BoundedInjection {
   $worker = $null
   try {
     $workerArguments = @(
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
+      '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $PSCommandPath + '"'),
       '-WorkerProcessId', [string]$Window.ProcessId, '-WorkerWindowHandle', [string]$Window.Handle, '-WorkerRefreshId', $refreshId
     )
     if ($MeterOnly) { $workerArguments += '-WorkerMeterOnly' }
     else { $workerArguments += @('-WorkerOrganization', $Organization) }
-    $worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ErrorAction Stop -ArgumentList $workerArguments
+    $worker = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -ErrorAction Stop -ArgumentList $workerArguments `
+      -RedirectStandardError (Join-Path $usageHome 'claude-desktop-usage-worker.stderr.log') `
+      -RedirectStandardOutput (Join-Path $usageHome 'claude-desktop-usage-worker.stdout.log')
+    # Keep the process handle before a short-lived worker can exit. Otherwise
+    # Windows PowerShell's Start-Process can return a null ExitCode later.
+    $null = $worker.Handle
     $deadline = $startedAt.AddSeconds(45)
     while (-not $worker.HasExited -and [DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
     if (-not $worker.HasExited) {
@@ -674,7 +787,11 @@ function Invoke-BoundedInjection {
       Write-InjectorLog "worker timeout organization=$Organization limit=45s"
       return $false
     }
-    if ($worker.ExitCode -ne 0) { return $false }
+    $null = $worker.WaitForExit(1000)
+    if ($worker.ExitCode -ne 0) {
+      Write-InjectorLog "worker failed organization=$Organization exit=$($worker.ExitCode); see claude-desktop-usage-worker.stderr.log"
+      return $false
+    }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
     do {
       if ($MeterOnly) {
@@ -773,12 +890,11 @@ try {
       foreach ($target in $targets) {
         if (-not $forceOnce -and $staleOrganizations -notcontains $target.Organization) { continue }
         $key = $target.Profile + '|' + $target.Organization
-        if (-not $states.ContainsKey($key)) {
-          $states[$key] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue }
-        }
-        $state = $states[$key]
-        if ([DateTimeOffset]::UtcNow -lt $state.NextAttempt) { continue }
         $window = Get-TargetWindow $target $processes $windows
+        # A restarted or updated Claude renderer must not inherit the previous
+        # process's failure cooldown.
+        $state = Get-ClaudeRetryState $states $key $window
+        if ([DateTimeOffset]::UtcNow -lt $state.NextAttempt) { continue }
         $success = $false
         if ($null -eq $window) {
           Write-InjectorLog "profile window unavailable organization=$($target.Organization) profile=$($target.Profile)"
