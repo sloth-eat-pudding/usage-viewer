@@ -9,7 +9,7 @@
 })(typeof window === 'object' ? window : globalThis, function () {
   'use strict'
 
-  const VERSION = '1.2.0'
+  const VERSION = '1.3.0'
   const KEY = '__usageViewerSessionMeter'
   const PRICING_DATE = '2026-10-21'
   const PRICING_URL = 'https://platform.claude.com/docs/en/about-claude/pricing'
@@ -257,6 +257,13 @@
     if (!win?.document || !win['claude.web']?.LocalSessions) return null
     win[KEY]?.dispose()
     const doc = win.document
+    // Use each Code pane's available width, retaining Claude's responsive
+    // gutters, sidebar and split-pane boundaries. CSS also covers new sessions.
+    for (const oldStyle of doc.querySelectorAll('#usage-viewer-full-width')) oldStyle.remove()
+    const layoutStyle = doc.createElement('style')
+    layoutStyle.id = 'usage-viewer-full-width'
+    layoutStyle.textContent = '.epitaxy-chat-panel { --chat-column-measure: 100% !important; }'
+    doc.head.appendChild(layoutStyle)
     const api = win['claude.web'].LocalSessions
     const state = { id: null, metrics: null, error: null, host: null, revision: 0, busy: false, disposed: false }
     let chips = null
@@ -408,6 +415,7 @@
         win.clearTimeout(eventTimer)
         if (typeof detach === 'function') detach()
         removeHost()
+        layoutStyle.remove()
         if (win[KEY] === controller) delete win[KEY]
       }
     }

@@ -450,7 +450,7 @@ function Test-FreshBridgeSnapshot {
 }
 
 function Test-SessionMeterHeartbeat {
-  param([string]$Instance, [string]$RefreshId = '', [string]$Version = '1.2.0')
+  param([string]$Instance, [string]$RefreshId = '', [string]$Version = '1.3.0')
   if ($Instance -notmatch '^\d{1,10}-\d{1,20}$') { return $false }
   try {
     $file = Join-Path $usageHome "claude-session-meter-$Instance-latest.json"
@@ -855,7 +855,7 @@ try {
           if (Invoke-BoundedInjection $meterWindow -MeterOnly) {
             $meterState.Failures = 0
             $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds(75)
-            Write-InjectorLog "meter verified window=$instance version=1.2.0"
+            Write-InjectorLog "meter verified window=$instance version=1.3.0"
           } else {
             $meterState.Failures++
             $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds((Get-RetryDelaySeconds $meterState.Failures))

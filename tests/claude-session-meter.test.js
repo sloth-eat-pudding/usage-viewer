@@ -112,7 +112,8 @@ function fakeWindow(api) {
   const intervals = new Map()
   let next = 0
   return {
-    document: { documentElement: {}, querySelectorAll: () => [] },
+    document: { documentElement: {}, querySelectorAll: () => [],
+      createElement: () => ({ remove() {} }), head: { appendChild() {} } },
     location: { pathname: '/epitaxy/' + idA },
     'claude.web': { LocalSessions: api },
     MutationObserver: class { observe() {} disconnect() {} },

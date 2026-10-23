@@ -120,14 +120,14 @@ try {
   Assert-True ($discoveredWindows.Count -eq 3) 'Discover both profiles and multiple windows from one process, excluding renderers and cloaked windows'
   Assert-True (@($discoveredWindows | Where-Object { $_.ProcessId -eq 2 }).Count -eq 2) 'A second window in the same profile must not be lost'
   $path = Join-Path $usageHome 'claude-session-meter-2-1002-latest.json'
-  $heartbeat = @{ source = 'claude-session-meter'; instance = '2-1002'; version = '1.2.0'; refresh_id = $refreshId; observed_at = [DateTimeOffset]::UtcNow.ToString('O') }
+  $heartbeat = @{ source = 'claude-session-meter'; instance = '2-1002'; version = '1.3.0'; refresh_id = $refreshId; observed_at = [DateTimeOffset]::UtcNow.ToString('O') }
   Write-TestSnapshot $heartbeat
   Assert-True (Test-SessionMeterHeartbeat '2-1002' $refreshId) 'A matching current window heartbeat must be fresh'
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1003')) 'One window heartbeat cannot acknowledge another window'
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002' ([guid]::NewGuid().ToString()))) 'An older injection cannot acknowledge a new worker'
   $heartbeat.version = '1.0.0'; Write-TestSnapshot $heartbeat
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002')) 'Old meter versions must be upgraded'
-  $heartbeat.version = '1.2.0'; $heartbeat.observed_at = [DateTimeOffset]::UtcNow.AddSeconds(-90).ToString('O'); Write-TestSnapshot $heartbeat
+  $heartbeat.version = '1.3.0'; $heartbeat.observed_at = [DateTimeOffset]::UtcNow.AddSeconds(-90).ToString('O'); Write-TestSnapshot $heartbeat
   Assert-True (-not (Test-SessionMeterHeartbeat '2-1002')) 'A reloaded page stops heartbeats and must be reinjected'
   # Compile the actual Win32 helper without calling its input methods.
   $source = Get-Content $scriptPath -Raw
