@@ -118,7 +118,7 @@ public partial class MainWindow : Window
         while (ColumnsPanel.Children.Count > rows.Count) ColumnsPanel.Children.RemoveAt(ColumnsPanel.Children.Count - 1);
         while (ColumnsPanel.Children.Count < rows.Count)
         {
-            var column = new StackPanel { Margin = new Thickness(ColumnsPanel.Children.Count == 0 ? 0 : 20, 0, 0, 0) };
+            var column = new StackPanel { Margin = new Thickness(ColumnsPanel.Children.Count == 0 ? 0 : 10, 0, 0, 0) };
             column.Children.Add(new TextBlock { Foreground = MainText.Foreground, FontSize = MainText.FontSize, FontWeight = MainText.FontWeight });
             column.Children.Add(new TextBlock { Foreground = DetailText.Foreground, FontSize = DetailText.FontSize, Margin = DetailText.Margin });
             ColumnsPanel.Children.Add(column);
@@ -137,15 +137,15 @@ public partial class MainWindow : Window
         }
     }
 
-    // Like the overlay, reserve at least three digit slots for every number
-    // (100%, countdowns) so refreshes never move later columns or the edge.
+    // Like the overlay, reserve at least two digit slots for every number
+    // (including countdowns) so refreshes never move later columns or the edge.
     private void ReserveDigitWidth(TextBlock block, IEnumerable<string> lines) =>
         block.MinWidth = lines.Select(line => ReservedWidth(block, line)).DefaultIfEmpty(0).Max();
 
     private double ReservedWidth(TextBlock block, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return 0;
-        var placeholder = Regex.Replace(text, "[0-9]+", match => new string('8', Math.Max(3, match.Length)));
+        var placeholder = Regex.Replace(text, "[0-9]+", match => new string('8', Math.Max(2, match.Length)));
         return Math.Max(MeasureText(block, placeholder), MeasureText(block, text));
     }
 
@@ -233,7 +233,7 @@ public partial class MainWindow : Window
         {
             var newest = group.OrderByDescending(source => Timestamp(source.Snapshot)).First();
             var labels = string.Join("+", group.Select(source => source.Label));
-            rows.Add(($"{product}  {usageLine(newest.Snapshot)}  ({labels})", $"{product}  {Details(newest.Snapshot)}  ({labels})"));
+            rows.Add(($"{product} {usageLine(newest.Snapshot)} ({labels})", $"{product} {Details(newest.Snapshot)} ({labels})"));
         }
     }
 
@@ -271,15 +271,15 @@ public partial class MainWindow : Window
     private static string Percent(JsonElement? root, string name, string missing)
     {
         if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return missing;
-        return $"{value.GetDouble().ToString("0.##", CultureInfo.InvariantCulture)}%";
+        return $"{value.GetDouble().ToString("00.##", CultureInfo.InvariantCulture)}%";
     }
 
     // Same text as the script overlay: Claude shows "?" and Codex "-" for a missing window.
     private static string ClaudeUsageLine(JsonElement? root) =>
-        $"7d {Percent(root, "seven_day_used", "?")}  |  5h {Percent(root, "five_hour_used", "?")}";
+        $"7d {Percent(root, "seven_day_used", "?")} | 5h {Percent(root, "five_hour_used", "?")}";
 
     private static string CodexUsageLine(JsonElement? root) =>
-        $"7d {Percent(root, "seven_day_used", "-")}  |  5h {Percent(root, "five_hour_used", "-")}";
+        $"7d {Percent(root, "seven_day_used", "-")} | 5h {Percent(root, "five_hour_used", "-")}";
 
     private static string Details(JsonElement? root)
     {
