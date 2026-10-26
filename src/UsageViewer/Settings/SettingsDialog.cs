@@ -143,6 +143,7 @@ internal static class SettingsDialog
                 ("UsageViewer.StartCodexNativeMeter.ps1", "start-codex-native-meter.ps1"),
                 ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
                 ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs"),
+                ("UsageViewer.CodexDesktopUsage.cjs", "codex-desktop-usage.cjs"),
                 ("UsageViewer.CodexNativeMeter.js", "codex-native-meter.js") })
             {
                 using var resource = typeof(SettingsDialog).Assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidDataException($"Missing {resourceName}");

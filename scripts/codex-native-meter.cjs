@@ -40,6 +40,7 @@ function options(argv) {
     else if (arg === '--remove') result.mode = 'remove'
     else if (arg === '--reinstall') result.reinstall = true
     else if (arg === '--codex-home') result.codexHome = path.resolve(argv[++i])
+    else if (arg === '--usage-home') result.usageHome = path.resolve(argv[++i])
     else throw new Error(`Unknown argument: ${arg}`)
   }
   if (!Number.isInteger(result.port) || result.port < 1024 || result.port > 65535 ||
@@ -77,10 +78,10 @@ async function connect(url) {
     pending.clear()
   }
   return {
-    send(method, params = {}) {
+    send(method, params = {}, timeoutMs = 5000) {
       return new Promise((resolve, reject) => {
         const id = ++next
-        const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP request timeout')) }, 5000)
+        const timer = setTimeout(() => { pending.delete(id); reject(new Error('CDP request timeout')) }, timeoutMs)
         pending.set(id, { resolve, reject, timer })
         socket.send(JSON.stringify({ id, method, params }))
       })
@@ -93,6 +94,11 @@ async function json(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: 'error' })
   if (!response.ok) throw new Error(`CDP HTTP ${response.status}`)
   return response.json()
+}
+
+function quotaHome(config) {
+  return config.usageHome || (config.codexHome ? path.join(path.dirname(config.codexHome), 'usage') :
+    process.env.USAGE_VIEWER_HOME || path.join(os.homedir(), '.usage-viewer'))
 }
 
 async function run(config) {
@@ -117,7 +123,10 @@ async function run(config) {
         expression: 'window.__usageViewerCodexNativeMeter.threadId()', returnByValue: true })
       const threadId = active?.result?.value || null
       const data = readSession(config.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), threadId)
-      const snapshot = data ? { ...data, model: undefined, tokens: undefined, cache_estimate: estimateCacheWindow(data), thread_id: threadId } : null
+      const quota = require('./codex-desktop-usage.cjs').readFreshBridge(quotaHome(config))
+      const snapshot = data || quota ? { ...data, model: undefined, tokens: undefined, cache_estimate: data ? estimateCacheWindow(data) : null, thread_id: threadId,
+        ...(quota ? { five_hour_used: quota.percentages.five_hour_used, seven_day_used: quota.percentages.seven_day_used,
+          quota_observed_at: quota.observed_at } : {}) } : null
       const expression = config.mode === 'remove' ? 'window.__usageViewerCodexNativeMeter?.destroy()' :
         `window.__usageViewerCodexNativeMeter.update(${JSON.stringify(snapshot)});window.__usageViewerCodexNativeMeter.status()`
       const result = await client.send('Runtime.evaluate', { expression, returnByValue: true })
@@ -152,4 +161,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1 })
-module.exports = { options, debuggerUrl, readNativeSnapshot, estimateCacheWindow, run }
+module.exports = { options, debuggerUrl, readNativeSnapshot, estimateCacheWindow, run, connect, quotaHome }

@@ -2,7 +2,7 @@
 (() => {
   'use strict'
   const key = '__usageViewerCodexNativeMeter'
-  const version = '0.4.0'
+  const version = '0.5.0'
   const previous = window[key]
   if (previous?.version === version || previous?.status().stopped) return
   previous?.destroy()
@@ -31,9 +31,12 @@
   }
   function render() {
     if (stopped || !label) return
-    if (snapshot && snapshot.thread_id !== threadId()) snapshot = null
+    if (snapshot && snapshot.thread_id !== threadId()) snapshot = { thread_id: threadId(), five_hour_used: snapshot.five_hour_used,
+      seven_day_used: snapshot.seven_day_used, quota_observed_at: snapshot.quota_observed_at }
     const observed = Date.parse(snapshot?.observed_at || '')
-    const stale = !Number.isFinite(observed) || Date.now() - observed > 300000 || observed > Date.now() + 60000
+    const quotaTime = Date.parse(snapshot?.quota_observed_at || '')
+    const quotaFresh = Number.isFinite(quotaTime) && Date.now() - quotaTime < 90000 && quotaTime < Date.now() + 5000
+    const stale = !quotaFresh && (!Number.isFinite(observed) || Date.now() - observed > 300000 || observed > Date.now() + 60000)
     const expiry = snapshot?.cache_estimate?.assumed_ttl_seconds === 1800 ? Date.parse(snapshot.cache_estimate.expires_at) : NaN
     const seconds = Number.isFinite(expiry) ? Math.max(0, Math.ceil((expiry - Date.now()) / 1000)) : null
     const cacheTime = seconds === null ? '快取時間未知' : seconds === 0 ? '30m估算窗已過' :
@@ -42,7 +45,7 @@
       ? `成本≈US$${snapshot.cost_usd.toFixed(4)}（API標準價）` : '成本未知'
     const text = `用量  5h ${percent(snapshot?.five_hour_used)}  ·  7d ${percent(snapshot?.seven_day_used)}  ·  快取命中 ${percent(snapshot?.cached_input)}  ·  ${cacheTime}  ·  ${cost}${stale ? '  ·  資料較舊或未知' : ''}`
     if (label.textContent !== text) label.textContent = text
-    row.title = 'Usage Viewer · 額度為已使用百分比\n來源：目前聊天在此 profile 的本機用量紀錄；無法配對時顯示未知。\n成本依各次模型與累計 token 差額，按 2026-10-26 API 標準價格估算，GPT-6 已含長上下文倍率；非訂閱帳單，不含子代理、工具費、速度與區域加價。未知價格、快取寫入費或紀錄不全顯示未知。\n倒數以最後用量事件加 API 預設 30 分鐘粗估，非 Desktop 實際到期時間。\n觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
+    row.title = 'Usage Viewer · 額度為已使用百分比\n額度來源：此 profile 的桌面登入查詢；查詢不可用時採本機用量紀錄。快取與成本來源：目前聊天在此 profile 的本機用量紀錄。\n成本依各次模型與累計 token 差額，按 2026-10-26 API 標準價格估算，GPT-6 已含長上下文倍率；非訂閱帳單，不含子代理、工具費、速度與區域加價。未知價格、快取寫入費或紀錄不全顯示未知。\n倒數以最後用量事件加 API 預設 30 分鐘粗估，非 Desktop 實際到期時間。\n額度查詢時間：' + (quotaFresh ? new Date(quotaTime).toLocaleString() : '未知') + '\n聊天觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
     row.style.opacity = stale ? '0.65' : '1'
   }
   function mount() {

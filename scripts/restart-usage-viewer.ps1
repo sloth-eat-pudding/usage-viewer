@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $patterns = @(
   '*UsageOverlay.ps1*',
   '*sync-codex-remote.ps1*',
+  '*watch-codex-desktop-usage.ps1*',
   '*codex-usage-read.js*',
   '*claude-desktop-usage-read.js*',
   '*claude-desktop-usage-bridge.js*',
@@ -38,6 +39,7 @@ try {
 }
 
 Start-Sleep -Milliseconds 500
+Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\watch-codex-desktop-usage.ps1" -WindowStyle Hidden
 Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\..\src\overlay\UsageOverlay.ps1",'-DisplayMode','combined' -WindowStyle Hidden
 Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$PSScriptRoot\start-codex-reader.vbs`"" -WindowStyle Hidden
 Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$PSScriptRoot\start-claude-desktop-reader.vbs`"" -WindowStyle Hidden

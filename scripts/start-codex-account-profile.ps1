@@ -79,9 +79,9 @@ try {
     $_.CommandLine.Replace('/', '\').Contains($driver) -and
     $_.CommandLine.Contains($browserId) -and $_.CommandLine -match '(?:^|\s)--watch(?:\s|$)'
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  & $node $driver --port $Port --browser-id $browserId --codex-home $codex --reinstall
+  & $node $driver --port $Port --browser-id $browserId --codex-home $codex --usage-home $usage --reinstall
   if ($LASTEXITCODE -ne 0) { throw 'Codex meter installation failed.' }
-  $watcher = Start-Process -FilePath $node -ArgumentList "`"$driver`" --port $Port --browser-id $browserId --codex-home `"$codex`" --watch" `
+  $watcher = Start-Process -FilePath $node -ArgumentList "`"$driver`" --port $Port --browser-id $browserId --codex-home `"$codex`" --usage-home `"$usage`" --watch" `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'meter.stdout.log') `
     -RedirectStandardError (Join-Path $runtime 'meter.stderr.log')
   Start-Sleep -Milliseconds 750

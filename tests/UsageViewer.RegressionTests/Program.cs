@@ -11,6 +11,7 @@ var tests = new (string Name, Action Run)[]
     ("Claude desktop, custom and statusline source selection", ClaudeSources),
     ("Codex event order, source modes and rate-limit windows", CodexSources),
     ("Codex empty and invalid sessions", EmptyCodex),
+    ("Codex desktop bridge pairing and cache expiry", CodexBridge),
     ("Remote snapshot monotonicity", RemoteSnapshots),
     ("Legacy settings migration and source round trip", Settings),
     ("Concurrent snapshot writes remain complete JSON", ConcurrentWrites)
@@ -23,6 +24,29 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failed}/{tests.Length} regression groups passed.");
 return failed == 0 ? 0 : 1;
+
+static void CodexBridge()
+{
+    using var workspace = new Workspace();
+    var home = workspace.Root;
+    var store = new SnapshotStore(home);
+    var snapshot = new { source = "codex-desktop-bridge", profile_id = "default", observed_at = DateTimeOffset.UtcNow.ToString("O"),
+        percentages = new { five_hour_used = 0, seven_day_used = 15 } };
+    store.Write("codex-desktop-bridge-latest.json", snapshot);
+    var path = Path.Combine(home, "codex-desktop-bridge-latest.json");
+    Equal(true, CodexDesktopProfiles.ReadFresh(path, "default") is not null, "Fresh paired snapshot");
+    Equal(true, CodexDesktopProfiles.ReadFresh(path, "other") is null, "Never borrow another profile");
+    using (var reader = new CodexUsageReader(store, Path.Combine(home, "empty"))) reader.Refresh();
+    using (var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(home, "codex-desktop-latest.json"))))
+        Equal(0, document.RootElement.GetProperty("percentages").GetProperty("five_hour_used").GetInt32(), "Quota needs no chat events");
+    store.Write("codex-desktop-bridge-latest.json", new { source = "codex-desktop-bridge", profile_id = "default", observed_at = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("O") });
+    Equal(true, CodexDesktopProfiles.ReadFresh(path) is null, "Expired bridge is not current quota");
+    store.Write("codex-account-profile-ui.json", new { profiles = new[] { new { id = "other", name = "Other" }, new { id = "../bad", name = "Bad" } } });
+    store.Write("codex-account-other-latest.json", snapshot);
+    Equal(0, CodexDesktopProfiles.ReadAccounts(home).Count, "Mismatched account file is excluded");
+    store.Write("codex-account-other-latest.json", new { source = "codex-desktop-bridge", profile_id = "other", observed_at = DateTimeOffset.UtcNow.ToString("O") });
+    Equal(1, CodexDesktopProfiles.ReadAccounts(home).Count, "Registered account stays independent");
+}
 
 static void ClaudeProfiles()
 {

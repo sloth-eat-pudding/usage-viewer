@@ -51,9 +51,11 @@ function readCodexUsageByMode() {
   const localSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
   const remotes = readConfiguredRemoteSnapshots()
   const remoteSessions = findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
-  const desktop = localSessions.desktop
+  const sessionDesktop = localSessions.desktop
     ? buildCodexSnapshot(localSessions.desktop, 'desktop')
     : null
+  const bridge = require('../../scripts/codex-desktop-usage.cjs').readFreshBridge(USAGE_VIEWER_HOME)
+  const desktop = bridge ? { ...sessionDesktop, ...bridge, token_observed_at: sessionDesktop?.observed_at || null } : sessionDesktop
   const cli = localSessions.cli
     ? buildCodexSnapshot(localSessions.cli, 'cli')
     : null
@@ -466,16 +468,17 @@ function nullableString(value) {
 }
 
 function formatSummary(snapshot) {
+  const tokens = snapshot.tokens || {}
   return [
     `Codex source: ${snapshot.source_mode}`,
     `7d: ${formatPercent(snapshot.percentages.seven_day_used)}`,
     `5h: ${formatPercent(snapshot.percentages.five_hour_used)}`,
-    `Input: ${formatInteger(snapshot.tokens.total_input)}`,
-    `Cached input: ${formatInteger(snapshot.tokens.cache_read_input)} (${snapshot.percentages.cached_input.toFixed(1)}%)`,
-    `New input: ${formatInteger(snapshot.tokens.new_input)}`,
-    `Output: ${formatInteger(snapshot.tokens.output)}`,
-    `Reasoning output: ${formatInteger(snapshot.tokens.reasoning_output)}`,
-    `Session total: ${formatInteger(snapshot.tokens.session_total)}`,
+    `Input: ${formatInteger(tokens.total_input)}`,
+    `Cached input: ${formatInteger(tokens.cache_read_input)} (${formatPercent(snapshot.percentages.cached_input)})`,
+    `New input: ${formatInteger(tokens.new_input)}`,
+    `Output: ${formatInteger(tokens.output)}`,
+    `Reasoning output: ${formatInteger(tokens.reasoning_output)}`,
+    `Session total: ${formatInteger(tokens.session_total)}`,
     `Plan: ${snapshot.rate_limits.plan_type || '?'}`,
     `Primary window minutes: ${snapshot.rate_limits.primary_window_minutes || '?'}`,
     `7d reset: ${formatEpoch(snapshot.resets_at.seven_day_epoch_seconds)}`,
@@ -490,6 +493,7 @@ function formatPercent(value) {
 }
 
 function formatInteger(value) {
+  if (nullableNumber(value) === null) return '?'
   return new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 0
   }).format(value)

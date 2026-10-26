@@ -10,12 +10,39 @@ internal sealed class BackgroundProcesses : IDisposable
     private readonly string _home;
     private Process? _claudeUsageInjectorProcess;
     private Process? _remoteSyncProcess;
+    private Process? _codexUsageProcess;
 
     internal BackgroundProcesses(string home) => _home = home;
     internal void Start()
     {
         StartRemoteSync();
+        StartCodexDesktopUsage();
         StartClaudeDesktopUsageInjector();
+    }
+
+    private void StartCodexDesktopUsage()
+    {
+        try
+        {
+            var directory = Path.Combine(_home, "codex-desktop-reader");
+            Directory.CreateDirectory(directory);
+            foreach (var (resourceName, filename) in new[] {
+                ("UsageViewer.WatchCodexDesktopUsage.ps1", "watch-codex-desktop-usage.ps1"),
+                ("UsageViewer.CodexDesktopUsage.cjs", "codex-desktop-usage.cjs"),
+                ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
+                ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs") })
+            {
+                using var resource = typeof(UsageReaderService).Assembly.GetManifestResourceStream(resourceName)
+                    ?? throw new InvalidDataException($"Missing {resourceName}");
+                using var reader = new StreamReader(resource);
+                File.WriteAllText(Path.Combine(directory, filename), reader.ReadToEnd(), new UTF8Encoding(filename.EndsWith(".ps1")));
+            }
+            _codexUsageProcess = Process.Start(new ProcessStartInfo {
+                FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true,
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{Path.Combine(directory, "watch-codex-desktop-usage.ps1")}\""
+            });
+        }
+        catch (Exception error) { TraceClaude($"Codex desktop reader start failed={error.Message}"); }
     }
 
     private void StartRemoteSync()
@@ -83,6 +110,7 @@ internal sealed class BackgroundProcesses : IDisposable
     {
         Stop(_claudeUsageInjectorProcess);
         Stop(_remoteSyncProcess);
+        Stop(_codexUsageProcess);
     }
 
     private static void Stop(Process? process)

@@ -7,6 +7,7 @@ claudeReaderPath = folder & "\start-claude-desktop-reader.vbs"
 remoteSyncPath = folder & "\sync-codex-remote.ps1"
 claudeUsageInjectorPath = folder & "\claude-desktop-usage-injector.ps1"
 claudeUsageBridgeWatchPath = folder & "\watch-claude-desktop-usage-bridge.ps1"
+codexUsageWatchPath = folder & "\watch-codex-desktop-usage.ps1"
 
 ' Stop readers and close Usage Viewer windows from previous launches before
 ' starting fresh processes.
@@ -32,6 +33,9 @@ If fso.FileExists(claudeUsageInjectorPath) Then
 End If
 If fso.FileExists(claudeUsageBridgeWatchPath) Then
   shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & claudeUsageBridgeWatchPath & Chr(34), 0, False
+End If
+If fso.FileExists(codexUsageWatchPath) Then
+  shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & codexUsageWatchPath & Chr(34), 0, False
 End If
 shell.Run "wscript.exe " & Chr(34) & claudeReaderPath & Chr(34), 0, False
 shell.Run "wscript.exe " & Chr(34) & codexReaderPath & Chr(34), 0, False

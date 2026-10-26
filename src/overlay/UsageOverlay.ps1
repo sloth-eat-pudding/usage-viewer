@@ -581,7 +581,17 @@ function Update-CombinedUsageView {
   $claudeSources = @($claudeSources | Where-Object { $null -ne $_.Data })
 
   $codexSources = @()
-  if ($script:CodexDesktopGroup -ne "Hidden") { $codexSources += @{ Label = "D"; Group = $script:CodexDesktopGroup; Data = (Read-UsageJson $codexDesktopUsageFile) } }
+  $desktopQuota = Read-CodexBridgeSnapshot (Join-Path $usageHome 'codex-desktop-bridge-latest.json') 'default'
+  if (!$desktopQuota) { $desktopQuota = Read-UsageJson $codexDesktopUsageFile }
+  if ($script:CodexDesktopGroup -ne "Hidden") { $codexSources += @{ Label = "D"; Group = $script:CodexDesktopGroup; Data = $desktopQuota } }
+  try {
+    $accounts = (Get-Content -LiteralPath (Join-Path $usageHome 'codex-account-profile-ui.json') -Raw | ConvertFrom-Json).profiles
+    foreach ($account in $accounts) {
+      if ($account.id -eq 'default' -or $account.id -notmatch '^[a-zA-Z0-9_-]+$') { continue }
+      $quota = Read-CodexBridgeSnapshot (Join-Path $usageHome "codex-account-$($account.id)-latest.json") ([string]$account.id)
+      if ($quota) { $codexSources += @{ Label = ConvertTo-SourceAbbreviation ([string]$account.name) 'Codex'; Group = "account:$($account.id)"; Data = $quota } }
+    }
+  } catch { }
   if ($script:CodexCliGroup -ne "Hidden") { $codexSources += @{ Label = "C"; Group = $script:CodexCliGroup; Data = (Read-UsageJson $codexCliUsageFile) } }
   if ($script:CodexSshSources.Count -eq 0) {
     if ($script:CodexSshGroup -ne "Hidden") { $codexSources += @{ Label = "SSH 1"; Group = $script:CodexSshGroup; Data = (Read-UsageJson $codexRemoteUsageFile) } }
@@ -793,6 +803,17 @@ function Measure-TextWidth {
     $Text,
     $Font
   ).Width
+}
+
+function Read-CodexBridgeSnapshot {
+  param([string]$Path, [string]$ProfileId)
+  $data = Read-UsageJson $Path
+  if (!$data -or $data.source -ne 'codex-desktop-bridge' -or $data.profile_id -ne $ProfileId) { return $null }
+  try {
+    $age = ([DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse($data.observed_at)).TotalSeconds
+    if ($age -ge -5 -and $age -lt 90) { return $data }
+  } catch { }
+  return $null
 }
 
 function Read-UsageJson {

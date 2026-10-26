@@ -20,6 +20,8 @@
     <EmbeddedResource Include="..\..\scripts\start-codex-native-meter.ps1" LogicalName="UsageViewer.StartCodexNativeMeter.ps1" />
     <EmbeddedResource Include="..\..\scripts\codex-native-meter.cjs" LogicalName="UsageViewer.CodexNativeDriver.cjs" />
     <EmbeddedResource Include="..\..\scripts\codex-profile-metrics.cjs" LogicalName="UsageViewer.CodexProfileMetrics.cjs" />
+    <EmbeddedResource Include="..\..\scripts\codex-desktop-usage.cjs" LogicalName="UsageViewer.CodexDesktopUsage.cjs" />
+    <EmbeddedResource Include="..\..\scripts\watch-codex-desktop-usage.ps1" LogicalName="UsageViewer.WatchCodexDesktopUsage.ps1" />
     <EmbeddedResource Include="..\desktop-addon\codex-native-meter.js" LogicalName="UsageViewer.CodexNativeMeter.js" />
     <None Include="..\..\scripts\sync-codex-remote.ps1" Link="scripts\sync-codex-remote.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
     <!-- remote.env is an optional, machine-specific file and is gitignored. -->

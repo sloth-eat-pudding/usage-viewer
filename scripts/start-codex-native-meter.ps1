@@ -91,10 +91,11 @@ public static class UsageViewerCodexLauncher {
     $_.CommandLine.Replace('/', '\').Contains($driver) -and
     $_.CommandLine.Contains($browserId) -and $_.CommandLine -match '(?:^|\s)--watch(?:\s|$)'
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  & $node $driver --port $Port --browser-id $browserId --reinstall
+  $usage = Join-Path $env:USERPROFILE '.usage-viewer'
+  & $node $driver --port $Port --browser-id $browserId --usage-home $usage --reinstall
   if ($LASTEXITCODE -ne 0) { throw 'Meter installation failed.' }
   if (!$SkipReader) { Start-Process -FilePath 'wscript.exe' -ArgumentList (Quote-Argument (Join-Path $PSScriptRoot 'start-codex-reader.vbs')) -WindowStyle Hidden }
-  $watcher = Start-Process -FilePath $node -ArgumentList ((Quote-Argument $driver) + " --port $Port --browser-id $browserId --watch") `
+  $watcher = Start-Process -FilePath $node -ArgumentList ((Quote-Argument $driver) + " --port $Port --browser-id $browserId --usage-home " + (Quote-Argument $usage) + ' --watch') `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimeRoot 'codex-native-meter-watch.log') `
     -RedirectStandardError (Join-Path $runtimeRoot 'codex-native-meter-watch-error.log')
   Start-Sleep -Milliseconds 750

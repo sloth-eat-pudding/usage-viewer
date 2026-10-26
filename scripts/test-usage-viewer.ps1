@@ -22,7 +22,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax failed: $($file.Name)" }
   }
 
-  & node --test tests/claude-usage-contract.test.js tests/claude-profile-discovery.test.js tests/claude-subagent-usage.test.js tests/codex-native-meter.test.js tests/codex-profile-metrics.test.js
+  & node --test tests/claude-usage-contract.test.js tests/claude-profile-discovery.test.js tests/claude-subagent-usage.test.js tests/codex-native-meter.test.js tests/codex-profile-metrics.test.js tests/codex-desktop-usage.test.js
   if ($LASTEXITCODE -ne 0) { throw 'JavaScript contract tests failed' }
 
   & node --check src/desktop-addon/claude-session-meter.js
