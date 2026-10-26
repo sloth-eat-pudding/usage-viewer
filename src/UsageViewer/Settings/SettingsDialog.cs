@@ -122,7 +122,7 @@ internal static class SettingsDialog
                 }
         }
         catch { }
-        if (!accounts.Any(account => account.Id == "default")) accounts.Insert(0, new CodexAccountChoice("default", "Codex (original)"));
+        if (!accounts.Any(account => account.Id == "default")) accounts.Insert(0, new CodexAccountChoice("default", "Codex (self)"));
         return (accounts, selected);
     }
 

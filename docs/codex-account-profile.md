@@ -4,7 +4,7 @@
 
 ## 啟動
 
-Usage Viewer 的 **Settings → Codex account windows** 提供帳號選單、**Open** 與 **Manage accounts…**。初始只有 `Codex (original)`，代表原本帳號，沿用既有 Codex home／登入狀態；不預先新增其他帳號或專用資料夾。按 Open 會使用原本帳號的全寬用量視窗，並自動避開其他實例的本機埠。
+Usage Viewer 的 **Settings → Codex account windows** 提供帳號選單、**Open** 與 **Manage accounts…**。初始只有 `Codex (self)`，代表原本帳號，沿用既有 Codex home／登入狀態；不預先新增其他帳號或專用資料夾。按 Open 會使用原本帳號的全寬用量視窗，並自動避開其他實例的本機埠。
 
 準備新增時，在 Manage accounts… 按「新增帳號」，輸入名稱與資料夾，然後按「儲存註冊」。註冊會立即保存，不需要再按外層 Settings 的 Save。原本帳號不能改成其他 profile；已自行註冊的項目則可以修改名稱與資料夾。重新開啟 Settings 或展開帳號選單時會讀取最新清單。帳號的名稱、資料夾及上次開啟的選項存於 `%USERPROFILE%\.usage-viewer\codex-account-profile-ui.json`（或 USAGE_VIEWER_HOME），不受顯示分組的 Save／Cancel 影響。舊版記住的單一資料夾會保留為 Codex (saved folder)。
 

@@ -2,7 +2,7 @@
 function Read-CodexAccountRegistry([string]$Path, [string]$ProfilesRoot) {
   $saved = $null
   try { $saved = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
-  $profiles = @([pscustomobject]@{ id = 'default'; name = 'Codex (original)'; profile_root = '' })
+  $profiles = @([pscustomobject]@{ id = 'default'; name = 'Codex (self)'; profile_root = '' })
   foreach ($item in @($saved.profiles)) {
     if ($item.id -ne 'default' -and $item.id -match '^[a-zA-Z0-9_-]+$' -and $item.name -and $item.profile_root -and [IO.Path]::IsPathRooted([string]$item.profile_root)) {
       $profiles += [pscustomobject]@{ id = [string]$item.id; name = [string]$item.name; profile_root = [IO.Path]::GetFullPath([string]$item.profile_root) }
