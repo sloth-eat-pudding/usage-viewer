@@ -5,3 +5,8 @@ packages/
 *.user
 config/remote.env
 .tools/
+
+# Local debug and worker output
+/scripts/debug.log
+/worker-error.log
+/worker-output.log
