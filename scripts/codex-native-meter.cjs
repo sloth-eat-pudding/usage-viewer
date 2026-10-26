@@ -3,6 +3,17 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 
+function estimateCacheWindow(data, now = Date.now()) {
+  const model = /^gpt-(\d+)(?:\.(\d+))?(?:-|$)/i.exec(data.model?.id || data.model?.name || '')
+  const eligible = model && (Number(model[1]) >= 6 || (Number(model[1]) === 5 && Number(model[2]) >= 6))
+  const observed = Date.parse(data.observed_at || '')
+  const usedCache = ['cache_read_input', 'cache_creation_input'].some(key =>
+    typeof data.tokens?.[key] === 'number' && Number.isFinite(data.tokens[key]) && data.tokens[key] > 0)
+  if (!eligible || !usedCache || !Number.isFinite(observed) || observed > now + 60000) return null
+  // User-requested approximation based on API docs, not a measured Desktop TTL.
+  return { assumed_ttl_seconds: 1800, expires_at: new Date(observed + 1800000).toISOString() }
+}
+
 function readNativeSnapshot(directory) {
   try {
     const data = JSON.parse(fs.readFileSync(path.join(directory, 'codex-desktop-latest.json'), 'utf8'))
@@ -11,7 +22,8 @@ function readNativeSnapshot(directory) {
       observed_at: typeof data.observed_at === 'string' ? data.observed_at : null,
       five_hour_used: percent(data.percentages?.five_hour_used),
       seven_day_used: percent(data.percentages?.seven_day_used),
-      cached_input: percent(data.percentages?.cached_input)
+      cached_input: percent(data.percentages?.cached_input),
+      cache_estimate: estimateCacheWindow(data)
     }
   } catch { return null }
 }
@@ -25,6 +37,7 @@ function options(argv) {
     else if (arg === '--screenshot') result.screenshot = path.resolve(argv[++i])
     else if (arg === '--watch') result.mode = 'watch'
     else if (arg === '--remove') result.mode = 'remove'
+    else if (arg === '--reinstall') result.reinstall = true
     else throw new Error(`Unknown argument: ${arg}`)
   }
   if (!Number.isInteger(result.port) || result.port < 1024 || result.port > 65535 ||
@@ -96,8 +109,9 @@ async function run(config) {
     const client = await connect(debuggerUrl(target.webSocketDebuggerUrl, config.port, 'page').href)
     try {
       // No app text, auth tokens, account data or session contents are requested.
+      const reset = config.reinstall ? 'window.__usageViewerCodexNativeMeter?.destroy();delete window.__usageViewerCodexNativeMeter;' : ''
       const expression = config.mode === 'remove' ? 'window.__usageViewerCodexNativeMeter?.destroy()' :
-        `${payload}\n;window.__usageViewerCodexNativeMeter.update(${JSON.stringify(snapshot)});window.__usageViewerCodexNativeMeter.status()`
+        `${reset}${payload}\n;window.__usageViewerCodexNativeMeter.update(${JSON.stringify(snapshot)});window.__usageViewerCodexNativeMeter.status()`
       const result = await client.send('Runtime.evaluate', { expression, returnByValue: true })
       if (result.exceptionDetails) throw new Error('Renderer rejected the meter payload')
       if (result.result?.value?.mounted) {
@@ -116,6 +130,7 @@ async function run(config) {
 async function main() {
   const config = options(process.argv.slice(2))
   console.log(JSON.stringify(await run(config)))
+  config.reinstall = false
   if (config.mode === 'watch') {
     const timer = setInterval(async () => {
       if (main.pending) return
@@ -126,4 +141,4 @@ async function main() {
   }
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1 })
-module.exports = { options, debuggerUrl, readNativeSnapshot, run }
+module.exports = { options, debuggerUrl, readNativeSnapshot, estimateCacheWindow, run }

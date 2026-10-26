@@ -6,11 +6,21 @@
 
 ## 快取資料的可見範圍
 
-標籤顯示「來源快取命中」與「期限未知」。命中率採用本機 reader 快照的 `percentages.cached_input`，也就是來源最近一次輸入的 cached input / input tokens；不是快取剩餘時間，也不是目前畫面聊天的專屬數值。
+版本 `0.3.0` 顯示「來源快取命中」與使用者要求的粗估倒數，例如「快取≈28:12（假設30m）」。命中率採用本機 reader 快照的 `percentages.cached_input`，也就是來源最近一次輸入的 cached input / input tokens；不是目前畫面聊天的專屬數值。
 
-實測 Desktop token-count 紀錄包含 `cached_input_tokens` 與 `cache_write_input_tokens`，但未提供 TTL 或 `expires_at`，因此目前沒有可靠的精確到期倒數。沒有命中率資料時顯示 `—`，不當成零。
+實測 Desktop token-count 紀錄包含 `cached_input_tokens` 與 `cache_write_input_tokens`，但未提供 TTL 或 `expires_at`。針對 GPT-5.6 之後的模型，若該筆來源用量紀錄有快取讀／寫，粗估窗口採用 `observed_at + 30 分鐘`，每秒顯示倒數。輪詢與重開程式不會延長同一筆事件的窗口。模型不符合、沒有快取使用紀錄或時間不合理時顯示未知；沒有命中率資料時顯示 `—`，不當成零。
 
-[OpenAI API 的 prompt caching 文件](https://developers.openai.com/api/docs/guides/prompt-caching)描述了不同模型與設定下的快取保留行為；API 的預設值不能直接當成這次 Codex Desktop 請求的實際設定或精確到期時間。元件不猜測固定 5m／30m／1h，也不發送保溫請求。
+[OpenAI API 的 prompt caching 文件](https://developers.openai.com/api/docs/guides/prompt-caching)描述了 GPT-5.6 之後模型預設 30 分鐘的最低快取窗口及讀取刷新行為。這裡只是借用該預設值作假設，未驗證 Desktop 的實際設定、伺服器讀寫時刻或各 prefix 的生命週期。來源事件時間也可能晚於請求開始時間。歸零顯示「30m估算窗已過」，不宣稱快取已失效；正值也不保證下次命中。元件不發送保溫請求。
+
+## 日常啟動與帳號
+
+在專案根目錄雙擊 `Start-Codex-Session-Meter.cmd`。需要 Node.js 22+ 與目前 Windows 使用者已註冊的官方 Store Codex。啟動器自動找到最新安裝位置、使用 `.tools/codex-native-test-profile` 啟動或重用視窗、驗證 loopback 埠的程序與 profile 身份、取得當次 browser ID，再啟動 reader 與背景 watcher。重複啟動會替換同一個已驗證實例的 watcher，不強制關閉 Codex。按過 × 後再次雙擊啟動入口會重新啟用元件與全寬。
+
+平常從官方 Codex 捷徑開啟的視窗不會自動附加元件。測試實例完整結束後，watcher 遇到斷線會退出；下次仍用上述入口啟動。執行紀錄與當次程序身份保存在 `.tools/codex-native-meter-*`，不提交版本控制。若第一次啟動失敗，錯誤會停留在命令視窗，不會關閉正常 Codex 或接管身份不明的埠。
+
+這個入口沿用目前帳號的 Codex home／後端。開不同聊天、分頁或此測試視窗，**不等於不同帳號**。獨立 `--user-data-dir` 只隔開桌面瀏覽資料；不能視為帳號隔離。
+
+同時使用不同帳號需另行驗證獨立的桌面 profile、`CODEX_HOME`／憑證儲存、CDP 埠與 reader snapshot 目錄。官方 [環境變數](https://learn.chatgpt.com/docs/config-file/environment-variables)列出 `CODEX_HOME` 涵蓋 config、auth、logs 與 sessions；[登入文件](https://learn.chatgpt.com/docs/auth)也說明憑證可能存在 auth.json 或系統憑證存放區。不能只換頁面或只換 UI profile 就承諾帳號完全分開。本版本尚未實測多帳號，請勿用它進行帳號隔離或在共用實例登出另一帳號。
 
 ## 已實測環境
 
@@ -45,7 +55,7 @@ node scripts/codex-native-meter.cjs --port 19335 --browser-id <verified-browser-
 - 停止 watcher 並關閉測試實例可關閉 CDP 埠；原本正常啟動的 Codex 不受影響。沒有安裝檔 patch 可還原。
 - CDP 能控制整個測試實例，僅限本機不代表沒有權限；不要將埠轉發或暴露到外部。
 
-這是非官方、依賴 Desktop DOM 的原型。更新 Codex 後必須重新驗證，不保證跨版本相容，也尚未設定為日常自動啟動。
+這是非官方、依賴 Desktop DOM 的原型。更新 Codex 後必須重新驗證，不保證跨版本相容；目前採手動雙擊啟動，沒有加入開機自動執行。
 
 ## 參考
 

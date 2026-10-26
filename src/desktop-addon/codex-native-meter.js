@@ -2,7 +2,7 @@
 (() => {
   'use strict'
   const key = '__usageViewerCodexNativeMeter'
-  const version = '0.2.0'
+  const version = '0.3.0'
   const previous = window[key]
   if (previous?.version === version || previous?.status().stopped) return
   previous?.destroy()
@@ -16,9 +16,13 @@
     if (stopped || !label) return
     const observed = Date.parse(snapshot?.observed_at || '')
     const stale = !Number.isFinite(observed) || Date.now() - observed > 300000 || observed > Date.now() + 60000
-    const text = `用量  5h ${percent(snapshot?.five_hour_used)}  ·  7d ${percent(snapshot?.seven_day_used)}  ·  來源快取命中 ${percent(snapshot?.cached_input)}  ·  期限未知${stale ? '  ·  資料較舊或未知' : ''}`
+    const expiry = snapshot?.cache_estimate?.assumed_ttl_seconds === 1800 ? Date.parse(snapshot.cache_estimate.expires_at) : NaN
+    const seconds = Number.isFinite(expiry) ? Math.max(0, Math.ceil((expiry - Date.now()) / 1000)) : null
+    const cacheTime = seconds === null ? '快取時間未知' : seconds === 0 ? '30m估算窗已過' :
+      `快取≈${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}（假設30m）`
+    const text = `用量  5h ${percent(snapshot?.five_hour_used)}  ·  7d ${percent(snapshot?.seven_day_used)}  ·  來源快取命中 ${percent(snapshot?.cached_input)}  ·  ${cacheTime}${stale ? '  ·  資料較舊或未知' : ''}`
     if (label.textContent !== text) label.textContent = text
-    row.title = 'Usage Viewer 試作 · 額度為已使用百分比\n來源：最近有用量紀錄的 Desktop session，可能是其他聊天\n快取命中率為該來源最近一次輸入的 cached input / input tokens；本機紀錄未提供到期時間，無法可靠倒數。\n觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
+    row.title = 'Usage Viewer 試作 · 額度為已使用百分比\n來源：最近有用量紀錄的 Desktop session，可能是其他聊天\n快取命中率為該來源最近一次輸入的 cached input / input tokens。\n倒數以來源觀測時間加 API 預設 30 分鐘粗估；未確認 Desktop 的實際快取設定。歸零不代表伺服器快取已失效，正值也不保證下次命中。\n觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
     row.style.opacity = stale ? '0.65' : '1'
   }
   function mount() {
@@ -60,7 +64,7 @@
     render()
   }
   const observer = new MutationObserver(mount)
-  const freshnessTimer = setInterval(render, 30000)
+  const freshnessTimer = setInterval(render, 1000)
   function destroy() {
     stopped = true
     observer.disconnect()

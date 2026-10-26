@@ -91,7 +91,7 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 ## Codex Desktop 原介面用量標籤（實驗）
 
-已在 Windows 官方 Store 版測試透過本機 CDP，將小型 5h／7d 已使用百分比與來源快取命中率標籤直接放進 Codex 原本的輸入框容器，並讓聊天與輸入區使用可用全寬。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。快取到期時間未提供，因此不顯示推測倒數。此功能尚未設定為日常自動啟動，詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
+雙擊 `Start-Codex-Session-Meter.cmd`，即可啟動附有全寬與用量標籤的官方 Codex 測試視窗。標籤顯示 5h／7d 已使用百分比、來源快取命中率，以及基於 API 預設 30 分鐘假設的粗估倒數；不是伺服器實際到期時間。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。此入口沿用目前帳號，尚未實測多帳號隔離。詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
 
 ## 遠端 Codex 同步（可選）
 

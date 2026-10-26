@@ -1,7 +1,7 @@
 'use strict'
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { options, debuggerUrl, readNativeSnapshot } = require('../scripts/codex-native-meter.cjs')
+const { options, debuggerUrl, readNativeSnapshot, estimateCacheWindow } = require('../scripts/codex-native-meter.cjs')
 const identity = '11111111-2222-3333-4444-555555555555'
 test('native snapshots minimize data and distinguish zero from unknown', () => {
   const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
@@ -11,12 +11,27 @@ test('native snapshots minimize data and distinguish zero from unknown', () => {
     const file = path.join(directory, 'codex-desktop-latest.json')
     fs.writeFileSync(file, JSON.stringify({ session: { id: 'PRIVATE' }, source_file: 'PRIVATE',
       percentages: { five_hour_used: 0, seven_day_used: 101, cached_input: 0 } }))
-    assert.deepEqual(readNativeSnapshot(directory), { observed_at: null, five_hour_used: 0, seven_day_used: null, cached_input: 0 })
+    assert.deepEqual(readNativeSnapshot(directory), { observed_at: null, five_hour_used: 0, seven_day_used: null, cached_input: 0, cache_estimate: null })
     fs.writeFileSync(file, JSON.stringify({ percentages: { cached_input: '100' } }))
     assert.equal(readNativeSnapshot(directory).cached_input, null)
     fs.writeFileSync(file, '{')
     assert.equal(readNativeSnapshot(directory), null)
   } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('cache approximation uses event time, only for observed cache use on documented model families', () => {
+  const now = Date.parse('2026-10-26T08:00:00Z')
+  const snapshot = { model: { id: 'gpt-6.1-sol' }, observed_at: new Date(now - 120000).toISOString(), tokens: { cache_read_input: 123 } }
+  assert.deepEqual(estimateCacheWindow(snapshot, now), { assumed_ttl_seconds: 1800, expires_at: new Date(now + 1680000).toISOString() })
+  assert.equal(estimateCacheWindow(snapshot, now + 60000).expires_at, estimateCacheWindow(snapshot, now).expires_at, 'Polling does not extend the estimate')
+  for (const data of [
+    { ...snapshot, model: { id: 'gpt-5.1-codex' } },
+    { ...snapshot, model: { id: 'unknown' } },
+    { ...snapshot, tokens: { cache_read_input: 0 } },
+    { ...snapshot, tokens: { cache_read_input: '123' } },
+    { ...snapshot, observed_at: 'bad time' },
+    { ...snapshot, observed_at: new Date(now + 120000).toISOString() }
+  ]) assert.equal(estimateCacheWindow(data, now), null)
 })
 test('native experiment requires an explicit browser identity and bounded port', () => {
   assert.throws(() => options([]))
