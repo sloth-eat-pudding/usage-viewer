@@ -599,7 +599,7 @@ function Update-UsageView {
 
     $Title.Text = ""
     $Main.Text = Format-ClaudeUsageLine $json
-    $Detail.Text = "Claude  $reset | $age"
+    $Detail.Text = "A  $reset | $age"
     $CostToggle.Text = ""
   } catch {
     $Title.Text = ""
@@ -729,7 +729,7 @@ function Update-CombinedUsageView {
     $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
     $suffix = "  ($labels)"
     $mainLines += "$(Format-ClaudeUsageLine $item.Data)$suffix"
-    $detailLines += "Claude  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
+    $detailLines += "A  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
   $codexGroupNames = @($codexSources | ForEach-Object { [string]$_.Group } | Sort-Object -Unique)
@@ -739,7 +739,7 @@ function Update-CombinedUsageView {
     $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
     $suffix = "  ($labels)"
     $mainLines += "$(Format-CodexUsageLine $item.Data)$suffix"
-    $detailLines += "Codex   $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
+    $detailLines += "O  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
   $Main.Text = $mainLines -join "`r`n"
@@ -907,7 +907,7 @@ function Format-ClaudeUsageLine {
   $week = Format-UsagePercent $Claude.percentages.seven_day_used
   $fiveHour = Format-UsagePercent $Claude.percentages.five_hour_used
 
-  return "Claude  7d $week  |  5h $fiveHour"
+  return "A  7d $week  |  5h $fiveHour"
 }
 
 function Read-LatestClaudeUsage {
@@ -967,7 +967,7 @@ function Format-CodexUsageLine {
   $fiveHour = Format-UsagePercent $Codex.percentages.five_hour_used
   if ($week -eq "?") { $week = "-" }
   if ($fiveHour -eq "?") { $fiveHour = "-" }
-  return "Codex   7d $week  |  5h $fiveHour"
+  return "O  7d $week  |  5h $fiveHour"
 }
 
 function Get-CodexSourceSuffix {

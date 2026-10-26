@@ -79,8 +79,8 @@ public partial class MainWindow : Window
     {
         var lines = new List<string>();
         var details = new List<string>();
-        AppendGroupedUsage(lines, details, "Claude", ClaudeSources(), ClaudeUsageLine, ClaudeDetails);
-        AppendGroupedUsage(lines, details, "Codex", CodexSources(), CodexUsageLine, CodexDetails);
+        AppendGroupedUsage(lines, details, "A", ClaudeSources(), ClaudeUsageLine, ClaudeDetails);
+        AppendGroupedUsage(lines, details, "O", CodexSources(), CodexUsageLine, CodexDetails);
         MainText.Text = lines.Count == 0 ? "Waiting for usage..." : string.Join("\n", lines);
         DetailText.Text = string.Join("\n", details);
     }
@@ -145,9 +145,9 @@ public partial class MainWindow : Window
         {
             var newest = group.OrderByDescending(source => Timestamp(source.Snapshot)).First();
             var labels = string.Join("+", group.Select(source => source.Label));
-            lines.Add($"{product,-6}{usageLine(newest.Snapshot)}  ({labels})");
+            lines.Add($"{product,-2}{usageLine(newest.Snapshot)}  ({labels})");
             var detail = detailLine(newest.Snapshot);
-            if (!string.IsNullOrWhiteSpace(detail)) details.Add($"{product,-6}{detail}  ({labels})");
+            if (!string.IsNullOrWhiteSpace(detail)) details.Add($"{product,-2}{detail}  ({labels})");
         }
     }
 

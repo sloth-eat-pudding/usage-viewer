@@ -2,6 +2,8 @@
 
 Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量與重置時間。支援 Claude Desktop、Claude Code、Codex Desktop、Codex CLI，以及可選的遠端 Codex session 同步。
 
+浮窗以公司名稱首字母顯示產品：`A` 代表 Anthropic（Claude），`O` 代表 OpenAI（Codex）。括號內仍保留來源與分組標籤。
+
 > 使用前請閱讀 [免責聲明與第三方服務合規說明](DISCLAIMER.md)。Usage Viewer 並非 Anthropic、OpenAI 或其關係企業的官方產品，亦未獲其認可或背書；顯示的資料僅供參考，不應作為任何決策的唯一依據。
 
 ## 執行模式
