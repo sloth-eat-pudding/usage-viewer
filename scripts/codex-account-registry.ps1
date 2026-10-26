@@ -2,18 +2,14 @@
 function Read-CodexAccountRegistry([string]$Path, [string]$ProfilesRoot) {
   $saved = $null
   try { $saved = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
-  $profiles = @()
+  $profiles = @([pscustomobject]@{ id = 'default'; name = 'Codex (original)'; profile_root = '' })
   foreach ($item in @($saved.profiles)) {
-    if ($item.id -match '^[a-zA-Z0-9_-]+$' -and $item.name -and $item.profile_root -and [IO.Path]::IsPathRooted([string]$item.profile_root)) {
+    if ($item.id -ne 'default' -and $item.id -match '^[a-zA-Z0-9_-]+$' -and $item.name -and $item.profile_root -and [IO.Path]::IsPathRooted([string]$item.profile_root)) {
       $profiles += [pscustomobject]@{ id = [string]$item.id; name = [string]$item.name; profile_root = [IO.Path]::GetFullPath([string]$item.profile_root) }
     }
   }
-  if (!$profiles.Count) {
-    $first = if ($saved.profile_root) { [string]$saved.profile_root } else { Join-Path $ProfilesRoot 'account-1' }
-    $second = Join-Path $ProfilesRoot 'account-2'
-    if ([IO.Path]::GetFullPath($first).TrimEnd('\') -ieq [IO.Path]::GetFullPath($second).TrimEnd('\')) { $second = Join-Path $ProfilesRoot 'account-2-extra' }
-    $profiles = @([pscustomobject]@{ id = 'account-1'; name = 'Codex 1'; profile_root = $first },
-      [pscustomobject]@{ id = 'account-2'; name = 'Codex 2'; profile_root = $second })
+  if ($profiles.Count -eq 1 -and $saved.profile_root -and [IO.Path]::IsPathRooted([string]$saved.profile_root)) {
+    $profiles += [pscustomobject]@{ id = 'legacy'; name = 'Codex (saved folder)'; profile_root = [string]$saved.profile_root }
   }
   $selected = [string]$saved.selected_id
   if ($selected -notin @($profiles | ForEach-Object { $_.id })) { $selected = $profiles[0].id }
@@ -32,6 +28,7 @@ function Save-CodexAccountRegistry([string]$Path, $Registry) {
   } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 function Register-CodexAccount($Registry, [string]$Name, [string]$Root, [string]$Id = '') {
+  if ($Id -eq 'default') { throw 'The original account cannot be changed. Add a new account instead.' }
   $Name = $Name.Trim()
   if (!$Name -or !$Root -or ![IO.Path]::IsPathRooted($Root) -or $Root.Contains('"')) { throw 'A name and an absolute profile folder are required.' }
   $Root = [IO.Path]::GetFullPath($Root)

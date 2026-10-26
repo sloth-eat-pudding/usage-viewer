@@ -107,12 +107,16 @@ $accounts.Add_SelectedIndexChanged({
     $script:editingId = $accounts.SelectedItem.id
     $name.Text = $accounts.SelectedItem.name
     $folder.Text = $accounts.SelectedItem.profile_root
+    $editable = $script:editingId -ne 'default'
+    $name.Enabled = $folder.Enabled = $browse.Enabled = $register.Enabled = $editable
+    if (!$editable) { $status.Text = '目前是原本的 Codex 帳號。要註冊另一個帳號，請按「新增帳號」。' }
   }
 })
 $add.Add_Click({
   $accounts.SelectedIndex = -1
   $script:editingId = ''
-  $name.Text = "Codex $($registry.profiles.Count + 1)"
+  $name.Enabled = $folder.Enabled = $browse.Enabled = $register.Enabled = $true
+  $name.Text = "Codex $($registry.profiles.Count)"
   $folder.Text = Join-Path (Join-Path $env:LOCALAPPDATA 'UsageViewer\CodexProfiles') ([Guid]::NewGuid().ToString('N'))
   $status.Text = '填入名稱與資料夾後，按「儲存註冊」。'
   $name.Focus()
@@ -135,15 +139,17 @@ $open.Add_Click({
     $registry.selected_id = $selected.id
     Save-CodexAccountRegistry $savedPath $registry
     $script:selectedRoot = $selected.profile_root
-    $port = Select-ProfilePort $script:selectedRoot
-    $launcher = Join-Path $PSScriptRoot 'start-codex-account-profile.ps1'
+    $original = $selected.id -eq 'default'
+    $launcher = Join-Path $PSScriptRoot $(if ($original) { 'start-codex-native-meter.ps1' } else { 'start-codex-account-profile.ps1' })
     if (!(Test-Path -LiteralPath $launcher)) { throw '找不到 Codex 啟動程式，請更新 Usage Viewer。' }
     $logRoot = Join-Path $usageHome 'profile-launch-logs'
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $attempt = [Guid]::NewGuid().ToString('N')
     $script:stdout = Join-Path $logRoot "$attempt.stdout.log"
     $script:stderr = Join-Path $logRoot "$attempt.stderr.log"
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`" -ProfileRoot `"$script:selectedRoot`" -Port $port"
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
+    if ($original) { $arguments += ' -SkipReader -AutoPort' }
+    else { $port = Select-ProfilePort $script:selectedRoot; $arguments += " -ProfileRoot `"$script:selectedRoot`" -Port $port" }
     $script:launchProcess = Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden -PassThru `
       -RedirectStandardOutput $script:stdout -RedirectStandardError $script:stderr
     $open.Enabled = $browse.Enabled = $folder.Enabled = $close.Enabled = $false
@@ -158,7 +164,7 @@ $timer.Add_Tick({
   try {
     $script:launchProcess.WaitForExit()
     if ($script:launchProcess.ExitCode -eq 0) {
-      $status.Text = "已開啟 Codex。請在新視窗中選擇帳戶或登入。`r`n資料夾：$script:selectedRoot"
+      $status.Text = if ($script:selectedRoot) { "已開啟 Codex。請在新視窗中選擇帳戶或登入。`r`n資料夾：$script:selectedRoot" } else { '已開啟原本的 Codex 帳號。' }
     } else {
       $detail = (Get-Content -LiteralPath $script:stderr -Tail 8 -ErrorAction SilentlyContinue) -join "`r`n"
       $status.Text = "啟動失敗：$detail`r`n紀錄：$script:stderr"
@@ -169,6 +175,7 @@ $timer.Add_Tick({
     $script:launchProcess = $null
     $open.Enabled = $browse.Enabled = $folder.Enabled = $close.Enabled = $true
     $accounts.Enabled = $name.Enabled = $register.Enabled = $add.Enabled = $true
+    if ($accounts.SelectedItem.id -eq 'default') { $name.Enabled = $folder.Enabled = $browse.Enabled = $register.Enabled = $false }
   }
 })
 $dialog.Add_FormClosing({ param($sender, $eventArgs) if ($script:launchProcess -and !$script:launchProcess.HasExited) { $eventArgs.Cancel = $true } })

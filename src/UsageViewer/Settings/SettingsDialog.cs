@@ -106,7 +106,7 @@ internal static class SettingsDialog
     private static (List<CodexAccountChoice> Accounts, string Selected) ReadCodexAccounts()
     {
         var accounts = new List<CodexAccountChoice>();
-        var selected = "account-1";
+        var selected = "default";
         try
         {
             var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
@@ -122,7 +122,7 @@ internal static class SettingsDialog
                 }
         }
         catch { }
-        if (accounts.Count == 0) accounts.AddRange(new[] { new CodexAccountChoice("account-1", "Codex 1"), new CodexAccountChoice("account-2", "Codex 2") });
+        if (!accounts.Any(account => account.Id == "default")) accounts.Insert(0, new CodexAccountChoice("default", "Codex (original)"));
         return (accounts, selected);
     }
 
@@ -137,6 +137,7 @@ internal static class SettingsDialog
                 ("UsageViewer.CreateCodexAccountProfile.ps1", "create-codex-account-profile.ps1"),
                 ("UsageViewer.CodexAccountRegistry.ps1", "codex-account-registry.ps1"),
                 ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1"),
+                ("UsageViewer.StartCodexNativeMeter.ps1", "start-codex-native-meter.ps1"),
                 ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
                 ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs"),
                 ("UsageViewer.CodexNativeMeter.js", "codex-native-meter.js") })

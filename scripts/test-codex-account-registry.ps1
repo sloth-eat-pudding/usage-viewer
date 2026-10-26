@@ -6,18 +6,19 @@ try {
   $file = Join-Path $temporaryRoot 'registry.json'
   $profilesRoot = Join-Path $temporaryRoot 'profiles'
   $registry = Read-CodexAccountRegistry $file $profilesRoot
-  if ($registry.profiles.Count -ne 2 -or $registry.selected_id -ne 'account-1') { throw 'Two default accounts were not supplied.' }
-  if ($registry.profiles[0].profile_root -eq $registry.profiles[1].profile_root) { throw 'Default accounts share a folder.' }
+  if ($registry.profiles.Count -ne 1 -or $registry.selected_id -ne 'default' -or $registry.profiles[0].profile_root) { throw 'Initial state must contain only the original account, without a new profile folder.' }
   $firstRoot = Join-Path $temporaryRoot 'first account'
   $secondRoot = Join-Path $temporaryRoot 'second account'
-  [void](Register-CodexAccount $registry 'Work' $firstRoot 'account-1')
-  [void](Register-CodexAccount $registry 'Personal' $secondRoot 'account-2')
+  $first = Register-CodexAccount $registry 'Work' $firstRoot
+  $second = Register-CodexAccount $registry 'Personal' $secondRoot
+  [void](Register-CodexAccount $registry 'Work renamed' $firstRoot $first.id)
+  $registry.selected_id = $second.id
   Save-CodexAccountRegistry $file $registry
   $reloaded = Read-CodexAccountRegistry $file $profilesRoot
-  if ($reloaded.profiles.Count -ne 2 -or $reloaded.selected_id -ne 'account-2') { throw 'Selected account was not retained.' }
-  if (@($reloaded.profiles | Where-Object { $_.id -eq 'account-1' })[0].profile_root -ne $firstRoot) { throw 'First registration was lost.' }
-  if (@($reloaded.profiles | Where-Object { $_.id -eq 'account-2' })[0].profile_root -ne $secondRoot) { throw 'Opening the second account would require choosing its folder again.' }
-  foreach ($attempt in @(@('Work', (Join-Path $temporaryRoot 'third')), @('Other', $firstRoot), @('Other', 'relative-folder'))) {
+  if ($reloaded.profiles.Count -ne 3 -or $reloaded.selected_id -ne $second.id) { throw 'Selected account was not retained.' }
+  if (@($reloaded.profiles | Where-Object { $_.id -eq $first.id })[0].profile_root -ne $firstRoot) { throw 'First registration was lost.' }
+  if (@($reloaded.profiles | Where-Object { $_.id -eq $second.id })[0].profile_root -ne $secondRoot) { throw 'Opening the second account would require choosing its folder again.' }
+  foreach ($attempt in @(@('Work renamed', (Join-Path $temporaryRoot 'third')), @('Other', $firstRoot), @('Other', 'relative-folder'))) {
     $rejected = $false
     try { [void](Register-CodexAccount $reloaded $attempt[0] $attempt[1]) } catch { $rejected = $true }
     if (!$rejected) { throw 'Duplicate or invalid registration was accepted.' }
@@ -25,13 +26,13 @@ try {
   $legacyFile = Join-Path $temporaryRoot 'legacy.json'
   @{ profile_root = $firstRoot } | ConvertTo-Json | Set-Content -LiteralPath $legacyFile -Encoding UTF8
   $legacy = Read-CodexAccountRegistry $legacyFile $profilesRoot
-  if ($legacy.profiles[0].profile_root -ne $firstRoot -or $legacy.profiles.Count -ne 2) { throw 'Previous folder was not migrated.' }
-  if ($reloaded.profiles[0].id -ne 'account-1') { throw 'Renaming reordered the saved accounts.' }
-  @{ profile_root = (Join-Path $profilesRoot 'account-2') } | ConvertTo-Json | Set-Content -LiteralPath $legacyFile -Encoding UTF8
-  $collision = Read-CodexAccountRegistry $legacyFile $profilesRoot
-  if ($collision.profiles[0].profile_root -eq $collision.profiles[1].profile_root) { throw 'Migrated accounts share a folder.' }
+  if ($legacy.profiles[1].profile_root -ne $firstRoot -or $legacy.profiles.Count -ne 2) { throw 'Previous folder was not migrated.' }
+  if ($reloaded.profiles[0].id -ne 'default' -or $reloaded.profiles[1].id -ne $first.id) { throw 'Renaming reordered the saved accounts.' }
+  $rejected = $false
+  try { [void](Register-CodexAccount $registry 'Replace original' $firstRoot 'default') } catch { $rejected = $true }
+  if (!$rejected -or $registry.profiles[0].profile_root) { throw 'Original account was replaced by a new profile.' }
   if ((Test-Path -LiteralPath $firstRoot) -or (Test-Path -LiteralPath $secondRoot)) { throw 'Registering an account should not launch Codex or create credential folders.' }
-  Write-Output 'Codex account registry checks passed: two accounts, saved folders and selection, rename, duplicate rejection and legacy migration.'
+  Write-Output 'Codex account registry checks passed: original-only initial state, explicit registration, saved selection, rename, duplicate rejection and legacy migration.'
 } finally {
   $resolved = [IO.Path]::GetFullPath($temporaryRoot)
   if (!$resolved.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()), [StringComparison]::OrdinalIgnoreCase)) { throw 'Unexpected test cleanup path.' }

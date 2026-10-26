@@ -1,4 +1,4 @@
-param([ValidateRange(1024,65535)][int]$Port = 19335)
+param([ValidateRange(1024,65535)][int]$Port = 19335, [switch]$SkipReader, [switch]$AutoPort)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $runtimeRoot = Join-Path $projectRoot '.tools'
@@ -31,6 +31,21 @@ function Get-VerifiedListener {
     throw 'CDP port belongs to a different app/profile. No process was stopped.'
   }
   return $ownerId
+}
+if ($AutoPort) {
+  try {
+    $saved = Get-Content -LiteralPath (Join-Path $runtimeRoot 'codex-native-meter-state.json') -Raw | ConvertFrom-Json
+    if ($saved.profile -ieq $profilePath -and [int]$saved.port -ge 1024 -and [int]$saved.port -le 65535) { $Port = [int]$saved.port }
+  } catch { }
+  try { [void](Get-VerifiedListener) }
+  catch {
+    $occupied = @(netstat.exe -ano -p tcp | Select-String '^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+\d+\s*$' | ForEach-Object { [int]$_.Matches[0].Groups[1].Value })
+    $available = @(19335..19435 | Where-Object { $_ -notin $occupied })
+    if (!$available.Count) { throw 'No free Codex meter port is available.' }
+    $Port = $available[0]
+  }
+  $operationLock.Dispose()
+  $operationLock = [Threading.Mutex]::new($false, "Local\UsageViewerCodexNativeMeter-$Port")
 }
 try {
   try { $locked = $operationLock.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
@@ -78,7 +93,7 @@ public static class UsageViewerCodexLauncher {
   } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
   & $node $driver --port $Port --browser-id $browserId --reinstall
   if ($LASTEXITCODE -ne 0) { throw 'Meter installation failed.' }
-  Start-Process -FilePath 'wscript.exe' -ArgumentList (Quote-Argument (Join-Path $PSScriptRoot 'start-codex-reader.vbs')) -WindowStyle Hidden
+  if (!$SkipReader) { Start-Process -FilePath 'wscript.exe' -ArgumentList (Quote-Argument (Join-Path $PSScriptRoot 'start-codex-reader.vbs')) -WindowStyle Hidden }
   $watcher = Start-Process -FilePath $node -ArgumentList ((Quote-Argument $driver) + " --port $Port --browser-id $browserId --watch") `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimeRoot 'codex-native-meter-watch.log') `
     -RedirectStandardError (Join-Path $runtimeRoot 'codex-native-meter-watch-error.log')
