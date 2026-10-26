@@ -807,10 +807,19 @@ function Measure-TextWidth {
     return 0
   }
 
-  return [System.Windows.Forms.TextRenderer]::MeasureText(
-    $Text,
+  # Reserve three digit slots for each numeric value (including 100% and
+  # countdowns). Measure a stable placeholder without changing displayed text,
+  # so refreshes cannot move later columns or the window's right edge.
+  $layoutText = [regex]::Replace($Text, '[0-9]+', {
+    param($match)
+    '888'.PadRight([Math]::Max(3, $match.Length), [char]'8')
+  })
+  $reservedWidth = [System.Windows.Forms.TextRenderer]::MeasureText(
+    $layoutText,
     $Font
   ).Width
+  $actualWidth = [System.Windows.Forms.TextRenderer]::MeasureText($Text, $Font).Width
+  return [Math]::Max($reservedWidth, $actualWidth)
 }
 
 function Read-CodexBridgeSnapshot {
