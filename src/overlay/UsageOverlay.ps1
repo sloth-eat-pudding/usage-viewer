@@ -990,7 +990,7 @@ function Format-UsagePercent {
   param($Value)
 
   if ($null -eq $Value) { return "?" }
-  return "$(([double]$Value).ToString("0.##", [Globalization.CultureInfo]::InvariantCulture))%"
+  return "$(([double]$Value).ToString("00.##", [Globalization.CultureInfo]::InvariantCulture))%"
 }
 
 function Format-Usd {
