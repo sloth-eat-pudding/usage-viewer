@@ -44,6 +44,11 @@ internal static class SettingsDialog
         var claudeCli = AddGroupSelector(content, "Claude CLI", settings.ClaudeCliGroup, groupCodes);
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", settings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
+        AddSettingsSection(content, "Codex account windows");
+        content.Children.Add(new TextBlock { Text = "Choose a data folder to create or reopen a Codex sign-in window.", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        var createCodex = new Button { Content = "Create / open Codex profile…", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 0, 8) };
+        createCodex.Click += (_, _) => OpenCodexProfileCreator(dialog);
+        content.Children.Add(createCodex);
         AddSettingsSection(content, "Claude Custom sources");
         AddEditorHeader(content, false);
         var customRows = new List<SourceEditor>(); var customList = new StackPanel(); content.Children.Add(customList);
@@ -81,6 +86,28 @@ internal static class SettingsDialog
     {
         panel.Children.Add(new Border { Height = 1, Background = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(0, 8, 0, 8) });
         panel.Children.Add(new TextBlock { Text = title, Foreground = System.Windows.Media.Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 5) });
+    }
+
+    private static void OpenCodexProfileCreator(Window owner)
+    {
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            var scripts = Path.Combine(home, "profile-launcher");
+            Directory.CreateDirectory(scripts);
+            foreach (var (resourceName, filename) in new[] {
+                ("UsageViewer.CreateCodexAccountProfile.ps1", "create-codex-account-profile.ps1"),
+                ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1") })
+            {
+                using var resource = typeof(SettingsDialog).Assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidDataException($"Missing {resourceName}");
+                using var reader = new StreamReader(resource);
+                File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(true));
+            }
+            var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
+            foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);
+            Process.Start(start);
+        }
+        catch (Exception error) { MessageBox.Show(owner, error.Message, "Codex account window", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
     private static void AddEditorHeader(Panel panel, bool ssh)

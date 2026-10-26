@@ -1165,7 +1165,7 @@ function Show-DisplaySettings {
   $dialog.ForeColor = [System.Drawing.Color]::White
   $dialog.Opacity = 0.96
   $desktopOffset = if ($script:ClaudeDesktopSources.Count -gt 1) { 28 } else { 0 }
-  $dialog.ClientSize = New-Object System.Drawing.Size(350, (485 + $desktopOffset))
+  $dialog.ClientSize = New-Object System.Drawing.Size(350, (550 + $desktopOffset))
 
   $dialogTitle = New-Object System.Windows.Forms.Label
   $dialogTitle.Text = "Display settings"
@@ -1389,10 +1389,22 @@ function Show-DisplaySettings {
   $accountStatus.ForeColor = [System.Drawing.Color]::FromArgb(170, 170, 170)
   $dialog.Controls.Add($accountStatus)
 
+  $codexProfileButton = New-Object System.Windows.Forms.Button
+  $codexProfileButton.Text = 'Create / open Codex profile...'
+  $codexProfileButton.Location = New-Object System.Drawing.Point(20, (455 + $desktopOffset))
+  $codexProfileButton.Size = New-Object System.Drawing.Size(310, 32)
+  $codexProfileButton.Add_Click({
+    try {
+      $creator = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\scripts\create-codex-account-profile.ps1'))
+      Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$creator`"" -WindowStyle Hidden
+    } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Codex account window') }
+  })
+  $dialog.Controls.Add($codexProfileButton)
+
   $save = New-Object System.Windows.Forms.Button
   $save.Text = "Save"
   $save.DialogResult = [System.Windows.Forms.DialogResult]::OK
-  $save.Location = New-Object System.Drawing.Point(255, (460 + $desktopOffset))
+  $save.Location = New-Object System.Drawing.Point(255, (515 + $desktopOffset))
   $save.Size = New-Object System.Drawing.Size(75, 25)
   $dialog.AcceptButton = $save
   $dialog.Controls.Add($save)
@@ -1407,7 +1419,7 @@ function Show-DisplaySettings {
   $save.FlatAppearance.BorderSize = 0
   $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
   $save.ForeColor = [System.Drawing.Color]::White
-  foreach ($button in @($openEnvironment)) {
+  foreach ($button in @($openEnvironment, $codexProfileButton)) {
     $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $button.FlatAppearance.BorderSize = 0
     $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)

@@ -4,7 +4,11 @@
 
 ## 啟動
 
-在此測試分支的專案根目錄執行：
+在 Usage Viewer 的 Settings 按 **Create / open Codex profile…**，指定完整資料夾路徑，再按「建立／開啟」。新帳號選新資料夾；重開同一個視窗則選原資料夾。程式會記住上次路徑，並自動選擇可用的本機埠。同一個 profile 會沿用已記錄的埠。
+
+此入口已同時加入 EXE 與腳本版 Settings；EXE 內嵌啟動腳本，不需要另外下載專案。此入口是 Usage Viewer 的設定功能，實際開啟的是官方 Codex Desktop。
+
+也可以在專案根目錄執行：
 
 ```powershell
 .\Start-Codex-Account-Profile.cmd -ProfileRoot "D:\CodexProfiles\account-a" -Port 19336
