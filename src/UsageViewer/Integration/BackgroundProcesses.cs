@@ -9,13 +9,11 @@ internal sealed class BackgroundProcesses : IDisposable
 {
     private readonly string _home;
     private Process? _claudeUsageInjectorProcess;
-    private Process? _remoteSyncProcess;
     private Process? _codexUsageProcess;
 
     internal BackgroundProcesses(string home) => _home = home;
     internal void Start()
     {
-        StartRemoteSync();
         StartCodexDesktopUsage();
         StartClaudeDesktopUsageInjector();
     }
@@ -43,24 +41,6 @@ internal sealed class BackgroundProcesses : IDisposable
             });
         }
         catch (Exception error) { TraceClaude($"Codex desktop reader start failed={error.Message}"); }
-    }
-
-    private void StartRemoteSync()
-    {
-        try
-        {
-            var script = Path.Combine(AppContext.BaseDirectory, "scripts", "sync-codex-remote.ps1");
-            if (!File.Exists(script)) return;
-            _remoteSyncProcess = Process.Start(new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = AppContext.BaseDirectory
-            });
-        }
-        catch (Exception error) { TraceClaude($"remote sync start failed={error.Message}"); }
     }
 
     private void StartClaudeDesktopUsageInjector()
@@ -109,7 +89,6 @@ internal sealed class BackgroundProcesses : IDisposable
     public void Dispose()
     {
         Stop(_claudeUsageInjectorProcess);
-        Stop(_remoteSyncProcess);
         Stop(_codexUsageProcess);
     }
 

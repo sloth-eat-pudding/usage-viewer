@@ -4,7 +4,6 @@ folder = fso.GetParentFolderName(WScript.ScriptFullName)
 overlayPath = folder & "\start-overlay.vbs"
 codexReaderPath = folder & "\start-codex-reader.vbs"
 claudeReaderPath = folder & "\start-claude-desktop-reader.vbs"
-remoteSyncPath = folder & "\sync-codex-remote.ps1"
 claudeUsageInjectorPath = folder & "\claude-desktop-usage-injector.ps1"
 claudeUsageBridgeWatchPath = folder & "\watch-claude-desktop-usage-bridge.ps1"
 codexUsageWatchPath = folder & "\watch-codex-desktop-usage.ps1"
@@ -25,9 +24,6 @@ shell.Run cleanupWindows, 0, True
 
 ' This entry point is intentionally independent from the WPF executable.
 ' It always runs the script-based readers and PowerShell overlay.
-If fso.FileExists(remoteSyncPath) Then
-  shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & remoteSyncPath & Chr(34), 0, False
-End If
 If fso.FileExists(claudeUsageInjectorPath) Then
   shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & claudeUsageInjectorPath & Chr(34), 0, False
 End If
