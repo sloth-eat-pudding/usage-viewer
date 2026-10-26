@@ -91,6 +91,8 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 ## Codex Desktop 原介面用量標籤（實驗）
 
+指定資料夾啟動獨立登入狀態的測試入口為 `Start-Codex-Account-Profile.cmd -ProfileRoot "D:\CodexProfiles\account-a" -Port 19336`。已驗證新資料夾會進入登入／選擇帳戶畫面；此測試入口尚未整合登入後的每帳號用量標籤，完整範圍見 [帳號資料夾實驗](docs/codex-account-profile.md)。
+
 雙擊 `Start-Codex-Session-Meter.cmd`，即可啟動附有全寬與用量標籤的官方 Codex 測試視窗。標籤顯示 5h／7d 已使用百分比、來源快取命中率，以及基於 API 預設 30 分鐘假設的粗估倒數；不是伺服器實際到期時間。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。此入口沿用目前帳號，尚未實測多帳號隔離。詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
 
 ## 遠端 Codex 同步（可選）
