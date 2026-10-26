@@ -79,8 +79,8 @@ public partial class MainWindow : Window
     {
         var lines = new List<string>();
         var details = new List<string>();
-        AppendGroupedUsage(lines, details, "Claude", ClaudeSources(), ClaudeUsageLine, ClaudeDetails);
-        AppendGroupedUsage(lines, details, "Codex", CodexSources(), CodexUsageLine, CodexDetails);
+        AppendGroupedUsage(lines, details, "A", ClaudeSources(), ClaudeUsageLine, ClaudeDetails);
+        AppendGroupedUsage(lines, details, "O", CodexSources(), CodexUsageLine, CodexDetails);
         MainText.Text = lines.Count == 0 ? "Waiting for usage..." : string.Join("\n", lines);
         DetailText.Text = string.Join("\n", details);
     }
@@ -105,7 +105,9 @@ public partial class MainWindow : Window
     {
         new UsageSource("D", _displaySettings.CodexDesktopGroup, Read("codex-desktop-latest.json")),
         new UsageSource("C", _displaySettings.CodexCliGroup, Read("codex-cli-latest.json"))
-    }.Concat(_displaySettings.CodexSshSources.Select((source, index) =>
+    }.Concat(CodexDesktopProfiles.ReadAccounts(_home).Select(account =>
+            new UsageSource(AbbreviateSourceLabel(account.Name, "Codex"), "account:" + account.Id, account.Snapshot)))
+        .Concat(_displaySettings.CodexSshSources.Select((source, index) =>
             new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"SSH {index + 1}" : source.Name, "Codex"),
                 source.Group, ReadRemoteSnapshot(index)))).ToList();
 
@@ -145,9 +147,9 @@ public partial class MainWindow : Window
         {
             var newest = group.OrderByDescending(source => Timestamp(source.Snapshot)).First();
             var labels = string.Join("+", group.Select(source => source.Label));
-            lines.Add($"{product,-6}{usageLine(newest.Snapshot)}  ({labels})");
+            lines.Add($"{product,-2}{usageLine(newest.Snapshot)}  ({labels})");
             var detail = detailLine(newest.Snapshot);
-            if (!string.IsNullOrWhiteSpace(detail)) details.Add($"{product,-6}{detail}  ({labels})");
+            if (!string.IsNullOrWhiteSpace(detail)) details.Add($"{product,-2}{detail}  ({labels})");
         }
     }
 
@@ -175,6 +177,8 @@ public partial class MainWindow : Window
             var path = Path.Combine(_home, name);
             if (!File.Exists(path)) return null;
             using var document = JsonDocument.Parse(File.ReadAllText(path));
+            if (JsonValues.StringOrNull(document.RootElement, "source") == "codex-desktop-bridge")
+                return CodexDesktopProfiles.ReadFresh(path);
             return document.RootElement.Clone();
         }
         catch { return null; }

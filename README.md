@@ -2,6 +2,8 @@
 
 Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量與重置時間。支援 Claude Desktop、Claude Code、Codex Desktop、Codex CLI，以及可選的遠端 Codex session 同步。
 
+浮窗以公司名稱首字母顯示產品：`A` 代表 Anthropic（Claude），`O` 代表 OpenAI（Codex）。括號內仍保留來源與分組標籤。
+
 > 使用前請閱讀 [免責聲明與第三方服務合規說明](DISCLAIMER.md)。Usage Viewer 並非 Anthropic、OpenAI 或其關係企業的官方產品，亦未獲其認可或背書；顯示的資料僅供參考，不應作為任何決策的唯一依據。
 
 ## 執行模式
@@ -90,6 +92,12 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 它透過 Desktop 已有的唯讀 session 介面取得目前對話紀錄，不會發送模型請求來保溫。費用優先顯示引擎回報的累計值；缺少回報時才依已知模型與 cache 分類推估 API 成本，兩者皆不是訂閱方案的實際帳單。一般 Chat／Cowork 與多個模型選擇器的分割畫面目前不顯示，避免配對錯誤。詳細說明見 [session 顯示元件](docs/claude-session-meter.md)。
 
 腳本版的啟動與重新啟動入口都會執行 `scripts\watch-claude-desktop-usage-bridge.ps1`，每 15 秒檢查本機 bridge，未啟動或停止回應時自動恢復。啟動紀錄與標準錯誤保存在 `%USERPROFILE%\.usage-viewer\claude-desktop-usage-bridge-watch.log` 與 `claude-desktop-usage-bridge.stderr.log`。
+
+## Codex Desktop 原介面用量標籤（實驗）
+
+在 Usage Viewer 的 **Settings → Codex account windows** 選帳號按 **Open**，即可建立或重開官方 Codex 視窗。初始只有原本帳號 `Codex`（名稱可自訂）；要新增時在 **Manage accounts… → 新增帳號** 註冊名稱與資料夾，保存後不用每次重選。程式自動管理本機埠，並啟用全寬、目前聊天的快取命中率／粗估倒數及 API 標準價成本估算（需 Node.js 22+）。指令入口為 `Start-Codex-Account-Profile.cmd -ProfileRoot "D:\CodexProfiles\account-a" -Port 19336`。沒有此 profile 的本機用量紀錄時顯示未知。完整多帳號憑證隔離尚未驗證，詳細範圍見 [帳號資料夾實驗](docs/codex-account-profile.md)。
+
+雙擊 `Start-Codex-Session-Meter.cmd`，即可啟動附有全寬與用量標籤的官方 Codex 測試視窗。標籤顯示 5h／7d 已使用百分比、來源快取命中率，以及基於 API 預設 30 分鐘假設的粗估倒數；不是伺服器實際到期時間。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。此入口沿用目前帳號，尚未實測多帳號隔離。詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
 
 ## 遠端 Codex 同步（可選）
 

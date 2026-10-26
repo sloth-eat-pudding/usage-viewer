@@ -53,6 +53,12 @@ internal sealed class CodexUsageReader : IDisposable
         if (_codexWatcher is not null && !dirty && now < _nextCodexPollUtc) return;
         _nextCodexPollUtc = now + CodexPollInterval;
         var root = _sessionsRoot;
+        var bridge = CodexDesktopProfiles.ReadFresh(Path.Combine(_home, "codex-desktop-bridge-latest.json"), "default");
+        if (bridge is not null)
+        {
+            _store.Write("codex-desktop-latest.json", bridge.Value);
+            _store.Write("codex-app-latest.json", bridge.Value);
+        }
         var localCandidates = new List<CodexCandidate>();
         foreach (var mode in new[] { "desktop", "cli" })
         {
@@ -60,11 +66,11 @@ internal sealed class CodexUsageReader : IDisposable
             if (local is not null)
             {
                 localCandidates.Add(local.Value);
-                WriteCodexSnapshot($"codex-{mode}-latest.json", local.Value);
+                if (mode != "desktop" || bridge is null) WriteCodexSnapshot($"codex-{mode}-latest.json", local.Value);
             }
         }
         var selectedLocal = localCandidates.OrderByDescending(candidate => candidate.Time).FirstOrDefault();
-        if (selectedLocal.File is not null) WriteCodexSnapshot("codex-app-latest.json", selectedLocal);
+        if (selectedLocal.File is not null && bridge is null) WriteCodexSnapshot("codex-app-latest.json", selectedLocal);
         var remoteRoot = Path.Combine(_home, "remote-codex");
         var remoteSources = _store.ReadConfiguredSources("remote-sources.json");
         for (var index = 0; index < remoteSources.Count; index++)

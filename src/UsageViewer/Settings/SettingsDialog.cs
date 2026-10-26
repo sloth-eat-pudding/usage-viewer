@@ -32,6 +32,9 @@ internal static class SettingsDialog
         Grid.SetRow(header, 0); root.Children.Add(header);
         var content = new StackPanel(); var scroll = new ScrollViewer { Content = content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 1); root.Children.Add(scroll);
         var groupCodes = BuildGroupCodes(settings);
+        AddSettingsSection(content, "Display layout");
+        var layoutSelector = new ComboBox { Width = 260, HorizontalAlignment = HorizontalAlignment.Left, ItemsSource = new[] { "Two rows / columns", "Stacked rows" }, SelectedIndex = settings.DisplayLayout == "stacked" ? 1 : 0 };
+        content.Children.Add(layoutSelector);
         AddSettingsSection(content, "Built-in sources");
         var configuredDesktop = detectedDesktop.Select((source, index) =>
         {
@@ -44,6 +47,24 @@ internal static class SettingsDialog
         var claudeCli = AddGroupSelector(content, "Claude CLI", settings.ClaudeCliGroup, groupCodes);
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", settings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
+        AddSettingsSection(content, "Codex account windows");
+        content.Children.Add(new TextBlock { Text = "Choose a data folder for a Codex window with full width, cache timing and cost estimates (Node.js 22+).", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        var codexAccounts = new ComboBox { Width = 260, DisplayMemberPath = nameof(CodexAccountChoice.Name) };
+        void RefreshCodexAccounts()
+        {
+            var (accounts, selected) = ReadCodexAccounts();
+            codexAccounts.ItemsSource = accounts;
+            codexAccounts.SelectedItem = accounts.FirstOrDefault(account => account.Id == selected) ?? accounts.FirstOrDefault();
+        }
+        RefreshCodexAccounts();
+        codexAccounts.DropDownOpened += (_, _) => RefreshCodexAccounts();
+        var openCodex = new Button { Content = "Open", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
+        openCodex.Click += (_, _) => { if (codexAccounts.SelectedItem is CodexAccountChoice account) OpenCodexProfileCreator(dialog, account.Id); };
+        var createCodex = new Button { Content = "Manage accounts…", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
+        createCodex.Click += (_, _) => OpenCodexProfileCreator(dialog);
+        var codexAccountRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        codexAccountRow.Children.Add(codexAccounts); codexAccountRow.Children.Add(openCodex); codexAccountRow.Children.Add(createCodex);
+        content.Children.Add(codexAccountRow);
         AddSettingsSection(content, "Claude Custom sources");
         AddEditorHeader(content, false);
         var customRows = new List<SourceEditor>(); var customList = new StackPanel(); content.Children.Add(customList);
@@ -73,7 +94,7 @@ internal static class SettingsDialog
         openEnvironment.Click += (_, _) => OpenClaudeEnvironment(selectedEnvironment, settings.ClaudeCustomSources);
         environmentSelector.SelectionChanged += (_, _) => selectedEnvironment = environmentSelector.SelectedItem as string ?? "default";
         var environmentRow = new StackPanel { Orientation = Orientation.Horizontal }; environmentRow.Children.Add(environmentSelector); environmentRow.Children.Add(openEnvironment); content.Children.Add(environmentRow);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { IReadOnlyList<ConfiguredSource> desktopSources = detectedDesktop.Count == 0 ? new List<ConfiguredSource>() : configuredDesktop.Select((source, index) => source with { Group = SelectedGroup(claudeDesktopSelectors[index]) }).ToList(); result = new DisplaySettings(desktopSources, SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { IReadOnlyList<ConfiguredSource> desktopSources = detectedDesktop.Count == 0 ? new List<ConfiguredSource>() : configuredDesktop.Select((source, index) => source with { Group = SelectedGroup(claudeDesktopSelectors[index]) }).ToList(); result = new DisplaySettings(desktopSources, SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment, layoutSelector.SelectedIndex == 1 ? "stacked" : "columns"); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
         return result;
     }
 
@@ -81,6 +102,60 @@ internal static class SettingsDialog
     {
         panel.Children.Add(new Border { Height = 1, Background = System.Windows.Media.Brushes.DimGray, Margin = new Thickness(0, 8, 0, 8) });
         panel.Children.Add(new TextBlock { Text = title, Foreground = System.Windows.Media.Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 5) });
+    }
+
+    private sealed record CodexAccountChoice(string Id, string Name);
+
+    private static (List<CodexAccountChoice> Accounts, string Selected) ReadCodexAccounts()
+    {
+        var accounts = new List<CodexAccountChoice>();
+        var selected = "default";
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(home, "codex-account-profile-ui.json")));
+            var root = document.RootElement;
+            if (root.TryGetProperty("selected_id", out var choice)) selected = choice.GetString() ?? selected;
+            if (root.TryGetProperty("profiles", out var profiles))
+                foreach (var profile in profiles.EnumerateArray())
+                {
+                    var id = profile.GetProperty("id").GetString();
+                    var name = profile.GetProperty("name").GetString();
+                    if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
+                }
+        }
+        catch { }
+        if (!accounts.Any(account => account.Id == "default")) accounts.Insert(0, new CodexAccountChoice("default", "Codex"));
+        return (accounts, selected);
+    }
+
+    private static void OpenCodexProfileCreator(Window owner, string? profileId = null)
+    {
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            var scripts = Path.Combine(home, "profile-launcher");
+            Directory.CreateDirectory(scripts);
+            foreach (var (resourceName, filename) in new[] {
+                ("UsageViewer.CreateCodexAccountProfile.ps1", "create-codex-account-profile.ps1"),
+                ("UsageViewer.CodexAccountRegistry.ps1", "codex-account-registry.ps1"),
+                ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1"),
+                ("UsageViewer.StartCodexNativeMeter.ps1", "start-codex-native-meter.ps1"),
+                ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
+                ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs"),
+                ("UsageViewer.CodexDesktopUsage.cjs", "codex-desktop-usage.cjs"),
+                ("UsageViewer.CodexNativeMeter.js", "codex-native-meter.js") })
+            {
+                using var resource = typeof(SettingsDialog).Assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidDataException($"Missing {resourceName}");
+                using var reader = new StreamReader(resource);
+                File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(filename.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)));
+            }
+            var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
+            foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);
+            if (profileId is not null) { start.ArgumentList.Add("-OpenProfileId"); start.ArgumentList.Add(profileId); }
+            Process.Start(start);
+        }
+        catch (Exception error) { MessageBox.Show(owner, error.Message, "Codex account window", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
     private static void AddEditorHeader(Panel panel, bool ssh)
