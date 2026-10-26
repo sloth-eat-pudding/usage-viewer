@@ -111,7 +111,7 @@ public partial class MainWindow : Window
 
     private static string AbbreviateSourceLabel(string label, string product)
     {
-        var words = Regex.Matches(label, @"[\p{L}\p{N}]+")
+        var words = Regex.Matches(label, @"[\p{L}\p{N}]+").Cast<Match>()
             .Select(match => match.Value)
             .Where(word => !word.All(char.IsDigit))
             .ToList();

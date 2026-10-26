@@ -88,7 +88,7 @@ internal sealed class BackgroundProcesses : IDisposable
     private static void Stop(Process? process)
     {
         if (process is null) return;
-        try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+        try { if (!process.HasExited) FrameworkCompat.KillTree(process); }
         catch { }
         finally { process.Dispose(); }
     }

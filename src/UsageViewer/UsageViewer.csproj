@@ -1,14 +1,24 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net7.0-windows</TargetFramework>
+    <!-- .NET Framework 4.8 ships with Windows 10/11, so the portable build needs no bundled runtime. -->
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>usage-viewer.ico</ApplicationIcon>
     <AssemblyName>UsageViewer</AssemblyName>
     <RootNamespace>UsageViewer</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Allows building and testing from Linux/macOS as well. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="10.0.14" />
+  </ItemGroup>
   <ItemGroup>
     <Resource Include="usage-viewer.ico" />
     <EmbeddedResource Include="..\..\scripts\claude-desktop-profiles.ps1" LogicalName="UsageViewer.ClaudeDesktopProfiles.ps1" />

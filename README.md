@@ -10,14 +10,16 @@ Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量�
 
 | 模式 | 入口 | Reader | 適用情境 |
 | --- | --- | --- | --- |
-| WPF 桌面程式 | `UsageViewer.exe` 或 `scripts\start-wpf-usage-viewer.cmd` | 內建 C# reader | 一般使用與 GitHub Release；self-contained exe 不需安裝 .NET 或 Node.js。 |
+| WPF 桌面程式 | `UsageViewer.exe` 或 `scripts\start-wpf-usage-viewer.cmd` | 內建 C# reader | 一般使用與 GitHub Release；使用 Windows 10/11 內建的 .NET Framework 4.8，不需另外安裝 .NET 或 Node.js。 |
 | PowerShell overlay | `scripts\start-usage-viewer.cmd` | Node.js readers + PowerShell overlay | 開發、除錯，或要直接使用腳本版浮窗時。 |
 
 兩條路徑不會互相啟動；請一次只使用其中一種。`scripts\restart-usage-viewer.cmd` 用於重新啟動目前開發中的 PowerShell overlay、readers 與遠端同步器。
 
 ## 直接使用
 
-從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`，解壓縮後直接執行 `UsageViewer.exe`。
+從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`（約 0.6 MB），解壓縮到任一資料夾後直接執行 `UsageViewer.exe`。資料夾內的 `.dll`、`UsageViewer.exe.config` 與 `scripts` 需與 exe 放在一起。
+
+程式使用 Windows 10/11 內建的 .NET Framework 4.8，不需安裝其他 runtime。
 
 exe 會在背景讀取本機 Claude/Codex session，並把資料寫入 `%USERPROFILE%\.usage-viewer`。右上角按鈕功能如下：
 
@@ -116,7 +118,7 @@ Copy-Item config\remote.env.example config\remote.env
 
 修改 reader、overlay、WPF UI 或設定後，先做適當的語法／建置檢查，再執行 `scripts\restart-usage-viewer.cmd`。WPF 與腳本 reader 都必須維持相同的 snapshot 格式與來源分組語意。
 
-完整本機檢查（需 Node.js 與 .NET 7 SDK）：
+完整本機檢查（需 Node.js 與 .NET 8 以上 SDK）：
 
 ```powershell
 .\scripts\test-usage-viewer.ps1
@@ -129,10 +131,10 @@ Copy-Item config\remote.env.example config\remote.env
 本機 publish：
 
 ```powershell
-dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:SatelliteResourceLanguages=en -o dist
+dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -o dist
 ```
 
-之後可使用 `scripts\start-wpf-usage-viewer.cmd` 啟動 `dist\UsageViewer.exe`。
+之後可使用 `scripts\start-wpf-usage-viewer.cmd` 啟動 `dist\UsageViewer.exe`。專案已設定 `EnableWindowsTargeting`，在 Linux／macOS 上也能用同一個指令建置 Windows 版本。
 
 如需 MSIX，先完成 publish 並安裝 Windows SDK，再執行：
 
@@ -140,7 +142,7 @@ dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -r win-x64 --self-c
 powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1
 ```
 
-推送 `v` 開頭的 tag 會觸發 GitHub Actions，產生 Windows x64 self-contained exe 的 ZIP、上傳 artifact，並建立或更新 GitHub Release：
+推送 `v` 開頭的 tag 會觸發 GitHub Actions，執行 C# 回歸測試，產生可攜式 Windows 程式的 ZIP、上傳 artifact，並建立或更新 GitHub Release：
 
 ```powershell
 git tag v0.0.10

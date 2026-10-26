@@ -181,7 +181,7 @@ internal sealed class ClaudeUsageReader : IDisposable
                     CreateNoWindow = true
                 }
             };
-            var commandLine = command.Contains(' ', StringComparison.Ordinal)
+            var commandLine = command.Contains(" ")
                 ? $"\"{command}\" -p /usage"
                 : $"{command} -p /usage";
             process.StartInfo.Arguments = $"/d /s /c \"{commandLine}\"";
@@ -193,7 +193,7 @@ internal sealed class ClaudeUsageReader : IDisposable
             if (!process.Start()) { TraceClaude("process start returned false"); return false; }
             if (!process.WaitForExit(15000))
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { FrameworkCompat.KillTree(process); } catch { }
                 TraceClaude("timeout");
                 return false;
             }
@@ -210,7 +210,7 @@ internal sealed class ClaudeUsageReader : IDisposable
                 try
                 {
                     if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
-                        _activeClaudeProcess.Kill(entireProcessTree: true);
+                        FrameworkCompat.KillTree(_activeClaudeProcess);
                 }
                 catch { }
                 _activeClaudeProcess = null;
@@ -234,7 +234,7 @@ internal sealed class ClaudeUsageReader : IDisposable
         catch { }
 
         var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var directory in path.Split(new[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries).Select(entry => entry.Trim()).Where(entry => entry.Length > 0))
         {
             foreach (var name in new[] { "claude.exe", "claude.cmd", "claude.bat", "claude" })
             {
@@ -325,7 +325,7 @@ internal sealed class ClaudeUsageReader : IDisposable
 
             if (parsed.Count == 0) return null;
             parsed.Sort((left, right) => left.Time.CompareTo(right.Time));
-            var current = parsed[^1];
+            var current = parsed[parsed.Count - 1];
             return new ClaudePlanUsage(
                 current.Time,
                 current.FiveHour,
@@ -367,7 +367,7 @@ internal sealed class ClaudeUsageReader : IDisposable
 
     private static DateTimeOffset? EstimateFiveHourReset(IReadOnlyList<ClaudePlanSample> samples)
     {
-        var latest = samples[^1];
+        var latest = samples[samples.Count - 1];
         if (latest.FiveHour is null || latest.FiveHour <= 0) return null;
 
         var start = samples.Count - 1;
@@ -477,7 +477,7 @@ internal sealed class ClaudeUsageReader : IDisposable
             try
             {
                 if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
-                    _activeClaudeProcess.Kill(entireProcessTree: true);
+                    FrameworkCompat.KillTree(_activeClaudeProcess);
             }
             catch { }
             _activeClaudeProcess = null;

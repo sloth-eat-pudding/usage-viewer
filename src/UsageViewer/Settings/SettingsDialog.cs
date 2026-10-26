@@ -53,7 +53,7 @@ internal static class SettingsDialog
         addCustom.Click += (_, _) =>
         {
             var name = PromptClaudeEnvironmentName(dialog, customRows.Count + 1);
-            if (string.IsNullOrWhiteSpace(name)) return;
+            if (name is null || string.IsNullOrWhiteSpace(name)) return;
             var profilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Claude-" + SafeProfileName(name));
             Directory.CreateDirectory(profilePath);
             var usageHistoryPath = Path.Combine(profilePath, "plan-usage-history.json");
@@ -169,7 +169,7 @@ internal static class SettingsDialog
         if (environment.Equals("self", StringComparison.OrdinalIgnoreCase)) { OpenClaudeSelf(); return; }
         var source = sources.FirstOrDefault(item => item.Name.Equals(environment, StringComparison.OrdinalIgnoreCase));
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var profile = string.IsNullOrWhiteSpace(source?.ProfilePath) ? Path.Combine(localAppData, "Claude-" + SafeProfileName(environment)) : source.ProfilePath;
+        var profile = source?.ProfilePath is { } configured && !string.IsNullOrWhiteSpace(configured) ? configured : Path.Combine(localAppData, "Claude-" + SafeProfileName(environment));
         var executable = new[] { Path.Combine(localAppData, "Programs", "Claude", "Claude.exe"), Path.Combine(localAppData, "Claude", "Claude.exe") }.FirstOrDefault(File.Exists) ?? "Claude.exe";
         try { Directory.CreateDirectory(profile); Process.Start(new ProcessStartInfo { FileName = executable, Arguments = $"--user-data-dir=\"{profile}\"", UseShellExecute = true }); } catch { }
     }

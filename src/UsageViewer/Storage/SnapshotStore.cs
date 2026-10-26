@@ -36,7 +36,7 @@ internal sealed class SnapshotStore
         // retry; never fall back to truncating the currently valid snapshot.
         for (var attempt = 0; ; attempt++)
         {
-            try { File.Move(temporaryPath, path, true); return; }
+            try { FrameworkCompat.MoveReplacing(temporaryPath, path); return; }
             catch (IOException) when (attempt < 5) { Thread.Sleep(25 * (attempt + 1)); }
             catch (UnauthorizedAccessException) when (attempt < 5) { Thread.Sleep(25 * (attempt + 1)); }
         }

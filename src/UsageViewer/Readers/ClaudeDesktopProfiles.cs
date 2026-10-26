@@ -33,8 +33,9 @@ internal static class ClaudeDesktopProfiles
             catch (UnauthorizedAccessException) { }
         }
         var index = 0;
-        foreach (var (family, history) in families)
+        foreach (var entry in families)
         {
+            var (family, history) = (entry.Key, entry.Value);
             index++;
             result.Add(new($"Claude Desktop (MSIX {index})", history,
                 System.IO.Path.Combine(localAppData, "Packages", family, "LocalCache", "Roaming", "Claude", "plan-usage-history.json"),

@@ -17,7 +17,7 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
     internal void Start() => _listener = StartClaudeDesktopUsageBridge();
 
     // This is the native equivalent of claude-desktop-usage-bridge.js.  Keeping
-    // it in the EXE preserves the self-contained release path (no Node needed).
+    // it in the EXE keeps the portable release free of Node.js.
     private HttpListener? StartClaudeDesktopUsageBridge()
     {
         try
@@ -140,7 +140,7 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
             var bytes = Encoding.UTF8.GetBytes(value);
             response.ContentType = "application/json";
             response.ContentLength64 = bytes.Length;
-            await response.OutputStream.WriteAsync(bytes);
+            await response.OutputStream.WriteAsync(bytes, 0, bytes.Length);
         }
         response.Close();
     }

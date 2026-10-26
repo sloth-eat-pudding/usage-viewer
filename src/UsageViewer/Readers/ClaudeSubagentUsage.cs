@@ -27,7 +27,7 @@ internal static class ClaudeSubagentUsage
             var project = Path.GetFullPath(projects[0]);
             string SafeFile(string file)
             {
-                var relative = Path.GetRelativePath(project, Path.GetFullPath(file));
+                var relative = FrameworkCompat.GetRelativePath(project, Path.GetFullPath(file));
                 if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) || new FileInfo(file).Length > 64 * 1024 * 1024)
                     throw new IOException("Unreadable transcript");
                 for (var current = Path.GetFullPath(file); current != project; current = Path.GetDirectoryName(current)!)
