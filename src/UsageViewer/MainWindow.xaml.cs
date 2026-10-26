@@ -271,7 +271,7 @@ public partial class MainWindow : Window
     private static string Percent(JsonElement? root, string name, string missing)
     {
         if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return missing;
-        return $"{value.GetDouble().ToString("00.##", CultureInfo.InvariantCulture)}%";
+        return $"{value.GetDouble().ToString("0.##", CultureInfo.InvariantCulture)}%";
     }
 
     // Same text as the script overlay: Claude shows "?" and Codex "-" for a missing window.
