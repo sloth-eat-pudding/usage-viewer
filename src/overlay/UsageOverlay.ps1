@@ -499,7 +499,7 @@ function Update-UsageView {
 
     $Title.Text = ""
     $Main.Text = Format-ClaudeUsageLine $json
-    $Detail.Text = "A  $reset | $age"
+    $Detail.Text = "A $reset | $age"
     $CostToggle.Text = ""
   } catch {
     $Title.Text = ""
@@ -637,9 +637,9 @@ function Update-CombinedUsageView {
     $groupItems = @($claudeSources | Where-Object { [string]$_.Group -eq $groupName })
     $item = $groupItems | Sort-Object { Get-UsageTimestamp $_.Data } -Descending | Select-Object -First 1
     $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
-    $suffix = "  ($labels)"
+    $suffix = " ($labels)"
     $mainLines += "$(Format-ClaudeUsageLine $item.Data)$suffix"
-    $detailLines += "A  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
+    $detailLines += "A $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
   $codexGroupNames = @($codexSources | ForEach-Object { [string]$_.Group } | Sort-Object -Unique)
@@ -647,9 +647,9 @@ function Update-CombinedUsageView {
     $groupItems = @($codexSources | Where-Object { [string]$_.Group -eq $groupName })
     $item = $groupItems | Sort-Object { Get-UsageTimestamp $_.Data } -Descending | Select-Object -First 1
     $labels = ($groupItems | ForEach-Object { $_.Label }) -join "+"
-    $suffix = "  ($labels)"
+    $suffix = " ($labels)"
     $mainLines += "$(Format-CodexUsageLine $item.Data)$suffix"
-    $detailLines += "O  $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
+    $detailLines += "O $(Format-ResetSummary $item.Data) | $(Format-Age (Get-UsageTimestamp $item.Data))$suffix"
   }
 
   $Main.Text = $mainLines -join "`r`n"
@@ -754,6 +754,7 @@ function Resize-UsageColumns {
   $mainHeight = [System.Windows.Forms.TextRenderer]::MeasureText('Ag', $Main.Font).Height + 2
   $detailHeight = [System.Windows.Forms.TextRenderer]::MeasureText('Ag', $Detail.Font).Height + 5
   $x = 7
+  $columnGap = 10
   for ($index = 0; $index -lt $mainLines.Count; $index++) {
     $column = $script:usageColumnControls[$index]
     $column.Main.Text = $mainLines[$index]
@@ -763,13 +764,13 @@ function Resize-UsageColumns {
       (Measure-TextWidth -Text $column.Detail.Text -Font $Detail.Font))
     $column.Main.SetBounds($x, 4, $width, $mainHeight)
     $column.Detail.SetBounds($x, (5 + $mainHeight), $width, $detailHeight)
-    $x += $width + 20
+    $x += $width + $columnGap
   }
   # Reserve the pin/settings/close strip after the final column.
   $buttonArea = if ($script:IsPinned) { 26 } else { 66 }
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
   $Form.ClientSize = [System.Drawing.Size]::new(
-    [int][Math]::Max($minimumWidth, $x - 20 + 6 + $buttonArea),
+    [int][Math]::Max($minimumWidth, $x - $columnGap + 6 + $buttonArea),
     [int][Math]::Max($Form.MinimumSize.Height, 4 + $mainHeight + 1 + $detailHeight + 7))
 }
 
@@ -905,7 +906,7 @@ function Format-ClaudeUsageLine {
   $week = Format-UsagePercent $Claude.percentages.seven_day_used
   $fiveHour = Format-UsagePercent $Claude.percentages.five_hour_used
 
-  return "A  7d $week  |  5h $fiveHour"
+  return "A 7d $week | 5h $fiveHour"
 }
 
 function Read-LatestClaudeUsage {
@@ -965,7 +966,7 @@ function Format-CodexUsageLine {
   $fiveHour = Format-UsagePercent $Codex.percentages.five_hour_used
   if ($week -eq "?") { $week = "-" }
   if ($fiveHour -eq "?") { $fiveHour = "-" }
-  return "O  7d $week  |  5h $fiveHour"
+  return "O 7d $week | 5h $fiveHour"
 }
 
 function Get-CodexSourceSuffix {
