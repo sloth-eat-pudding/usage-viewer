@@ -89,6 +89,10 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 腳本版的啟動與重新啟動入口都會執行 `scripts\watch-claude-desktop-usage-bridge.ps1`，每 15 秒檢查本機 bridge，未啟動或停止回應時自動恢復。啟動紀錄與標準錯誤保存在 `%USERPROFILE%\.usage-viewer\claude-desktop-usage-bridge-watch.log` 與 `claude-desktop-usage-bridge.stderr.log`。
 
+## Codex Desktop 原介面用量標籤（實驗）
+
+已在 Windows 官方 Store 版測試透過本機 CDP，將小型 5h／7d 已使用百分比標籤直接放進 Codex 原本的輸入框容器。每五秒讀取本機快照，按 × 可移除；不修改安裝檔。此功能尚未設定為日常自動啟動，詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
+
 ## 遠端 Codex 同步（可選）
 
 複製 `config\remote.env.example` 為 `config\remote.env`，再填入你的 SSH 連線資訊：
