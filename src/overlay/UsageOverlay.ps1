@@ -807,12 +807,12 @@ function Measure-TextWidth {
     return 0
   }
 
-  # Reserve three digit slots for each numeric value (including 100% and
-  # countdowns). Measure a stable placeholder without changing displayed text,
+  # Reserve two digit slots for each numeric value, including countdowns.
+  # Measure a stable placeholder without changing displayed text,
   # so refreshes cannot move later columns or the window's right edge.
   $layoutText = [regex]::Replace($Text, '[0-9]+', {
     param($match)
-    '888'.PadRight([Math]::Max(3, $match.Length), [char]'8')
+    '88'.PadRight([Math]::Max(2, $match.Length), [char]'8')
   })
   $reservedWidth = [System.Windows.Forms.TextRenderer]::MeasureText(
     $layoutText,
