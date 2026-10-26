@@ -191,6 +191,9 @@ $script:CodexSshGroup = Convert-GroupCode $script:CodexSshGroup
 if ($script:CodexSshSources.Count -eq 0 -and (Test-Path -LiteralPath $remoteSourcesFile)) {
   try { $remoteConfig = Get-Content -LiteralPath $remoteSourcesFile -Raw | ConvertFrom-Json; if ($remoteConfig.sources) { $script:CodexSshSources = @($remoteConfig.sources) } } catch { }
 }
+# Source arrays are authoritative; legacy scalar groups can be stale.
+if ($script:ClaudeCustomSources.Count -gt 0) { $script:ClaudeCustomGroup = Convert-GroupCode ([string]$script:ClaudeCustomSources[0].group) }
+if ($script:CodexSshSources.Count -gt 0) { $script:CodexSshGroup = Convert-GroupCode ([string]$script:CodexSshSources[0].group) }
 $overlayErrorLog = Join-Path $usageHome "overlay-error.log"
 $defaultWindowSize = New-Object System.Drawing.Size(340, 96)
 
@@ -257,7 +260,12 @@ $settingsButton.Size = New-Object System.Drawing.Size(20, 20)
 $settingsButton.Text = "S"
 $settingsButton.TabStop = $false
 $settingsButton.Add_Click({
-  if (-not (Show-SharedDisplaySettings)) { Show-DisplaySettings }
+  try {
+    if (-not (Show-SharedDisplaySettings)) { Show-DisplaySettings }
+  } catch {
+    Write-OverlayError $_
+    [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Usage Viewer Settings') | Out-Null
+  }
 })
 $panel.Controls.Add($settingsButton)
 
@@ -1090,7 +1098,8 @@ function Show-SharedDisplaySettings {
   if (-not (Test-Path -LiteralPath $settingsExe)) { return $false }
 
   try {
-    Start-Process -FilePath $settingsExe -ArgumentList "--settings" -Wait
+    $settingsProcess = Start-Process -FilePath $settingsExe -ArgumentList "--settings" -Wait -PassThru
+    if ($settingsProcess.ExitCode -ne 0) { throw "Settings process exited with code $($settingsProcess.ExitCode)" }
     if (-not (Test-Path -LiteralPath $displaySettingsFile)) { return $true }
 
     $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
@@ -1098,10 +1107,10 @@ function Show-SharedDisplaySettings {
     if ($savedSettings.claude_desktop_group) { $script:ClaudeDesktopGroup = Convert-GroupCode ([string]$savedSettings.claude_desktop_group) }
     if ($savedSettings.PSObject.Properties.Name -contains "claude_desktop_sources") { $script:ClaudeDesktopSources = @($savedSettings.claude_desktop_sources) }
     if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = Convert-GroupCode ([string]$savedSettings.claude_cli_group) }
-    if ($savedSettings.claude_custom_sources) { $script:ClaudeCustomSources = @($savedSettings.claude_custom_sources) }
+    if ($savedSettings.PSObject.Properties.Name -contains "claude_custom_sources") { $script:ClaudeCustomSources = @($savedSettings.claude_custom_sources) }
     if ($savedSettings.codex_desktop_group) { $script:CodexDesktopGroup = Convert-GroupCode ([string]$savedSettings.codex_desktop_group) }
     if ($savedSettings.codex_cli_group) { $script:CodexCliGroup = Convert-GroupCode ([string]$savedSettings.codex_cli_group) }
-    if ($savedSettings.codex_ssh_sources) { $script:CodexSshSources = @($savedSettings.codex_ssh_sources) }
+    if ($savedSettings.PSObject.Properties.Name -contains "codex_ssh_sources") { $script:CodexSshSources = @($savedSettings.codex_ssh_sources) }
     if ($savedSettings.claude_user_environment) {
       $script:ClaudeUserEnvironment = if ([string]$savedSettings.claude_user_environment -eq "self") { "default" } else { [string]$savedSettings.claude_user_environment }
     }
@@ -1115,8 +1124,16 @@ function Show-SharedDisplaySettings {
     Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
     return $true
   } catch {
+    Write-OverlayError $_
     return $false
   }
+}
+
+function Set-SourceDisplayGroup {
+  param([object[]]$Sources, [string]$PreviousGroup, [string]$SelectedGroup)
+  # Preserve independently configured groups unless the shared selector changed.
+  if ((Convert-GroupCode $PreviousGroup) -eq (Convert-GroupCode $SelectedGroup)) { return }
+  foreach ($source in $Sources) { $source.group = Convert-GroupCode $SelectedGroup }
 }
 
 function Show-DisplaySettings {
@@ -1453,9 +1470,11 @@ function Show-DisplaySettings {
     }
     $script:ClaudeDesktopGroup = if ($claudeDesktopSelectors.Count -gt 0) { [string]$claudeDesktopSelectors[0].SelectedItem } else { $script:ClaudeDesktopGroup }
     $script:ClaudeCliGroup = [string]$claudeCli.SelectedItem
+    Set-SourceDisplayGroup -Sources $script:ClaudeCustomSources -PreviousGroup $script:ClaudeCustomGroup -SelectedGroup ([string]$claudeCustom.SelectedItem)
     $script:ClaudeCustomGroup = [string]$claudeCustom.SelectedItem
     $script:CodexDesktopGroup = [string]$codexDesktop.SelectedItem
     $script:CodexCliGroup = [string]$codexCli.SelectedItem
+    Set-SourceDisplayGroup -Sources $script:CodexSshSources -PreviousGroup $script:CodexSshGroup -SelectedGroup ([string]$ssh.SelectedItem)
     $script:CodexSshGroup = [string]$ssh.SelectedItem
     New-Item -ItemType Directory -Force -Path $usageHome | Out-Null
     @{
