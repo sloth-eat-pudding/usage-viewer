@@ -51,7 +51,7 @@ try {
       $script:IsPinned = $pinned
       $expectedSize = $null
       $expectedBounds = $null
-      foreach ($value in @(9, 10, 99, 100, 1, 11, 0)) {
+      foreach ($value in @(9, 10, 99, 1, 11, 0)) {
         $main.Text = (@("A  5h $value%  7d $value% (D)", 'O  5h 50%  7d 60% (D+C)') -join "`n")
         $detail.Text = (@("Reset in ${value}h / ${value}d | ${value}m ago (source 1)", 'Reset in 4h / 6d | now (source 2)') -join "`n")
         Resize-OverlayToContent -Form $form -Main $main -Detail $detail
