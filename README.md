@@ -30,7 +30,7 @@ exe 會在背景讀取本機 Claude/Codex session，並把資料寫入 `%USERPRO
 - `×`：結束 viewer 與它啟動的背景 reader。
 - `Ctrl+Alt+P`：切換釘選。
 
-exe 與腳本版共用相同的讀取來源與顯示規則：沒有偵測到 Claude Desktop profile 時顯示 `claude-desktop-latest.json`；沒有設定 SSH 來源時，顯示 `config\remote.env` 同步的遠端 Codex。exe 同時只會執行一個；本機 bridge 埠被占用時，每 15 秒重試一次。
+exe 與腳本版共用相同的讀取來源與顯示規則：沒有偵測到 Claude Desktop profile 時顯示 `claude-desktop-latest.json`；沒有設定 SSH 來源時，顯示舊的遠端 Codex 快取（SSH 同步已停用，資料不會再更新）。exe 同時只會執行一個；本機 bridge 埠被占用時，每 15 秒重試一次。
 
 ## 來源與顯示設定
 

@@ -232,11 +232,6 @@ static void RemoteSnapshots()
     Equal(false, fixture.Store.IsNotOlder(snapshot, now.AddMinutes(-1)), "Older observation rejected");
     Equal(true, fixture.Store.IsNotOlder(snapshot, now), "Equal observation accepted");
     Equal(true, fixture.Store.IsNotOlder(snapshot, now.AddMinutes(1)), "Newer observation accepted");
-
-    using var envOnly = new Workspace();
-    WriteSession(Path.Combine(envOnly.Root, "remote-codex", "0", "sessions", "remote.jsonl"), "cli", now, 33);
-    using (var envReader = new CodexUsageReader(envOnly.Store, Path.Combine(envOnly.Root, "missing-local"))) envReader.Refresh();
-    Equal(33d, envOnly.Percent(snapshot), "remote.env-only sync slot is read without remote-sources.json");
 }
 
 static void ClaudeMappedProfile()

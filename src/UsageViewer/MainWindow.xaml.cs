@@ -165,8 +165,8 @@ public partial class MainWindow : Window
 
     private IEnumerable<UsageSource> CodexSshUsageSources()
     {
-        // With no configured SSH source, the synchronizer falls back to
-        // config\remote.env; show that snapshot as the overlay does.
+        // With no configured SSH source the overlay still shows the legacy
+        // remote snapshot (SSH copying is disabled, so it may be stale).
         if (_displaySettings.CodexSshSources.Count == 0)
             return new[] { new UsageSource("SSH 1", _displaySettings.CodexSshGroup, ReadRemoteSnapshot(0)) };
         return _displaySettings.CodexSshSources.Select((source, index) =>

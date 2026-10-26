@@ -81,13 +81,7 @@ internal sealed class CodexUsageReader : IDisposable
         }
         if (remoteSources.Count == 0)
         {
-            // Without remote-sources.json the synchronizer still copies the
-            // config\remote.env host into slot 0; older versions used the root.
-            var remoteLatest = new[] { Path.Combine(remoteRoot, "0", "sessions"), Path.Combine(remoteRoot, "sessions") }
-                .Select(directory => FindLatestCodexUsage(directory))
-                .Where(candidate => candidate is not null)
-                .OrderByDescending(candidate => candidate!.Value.Time)
-                .FirstOrDefault();
+            var remoteLatest = FindLatestCodexUsage(Path.Combine(remoteRoot, "sessions"));
             if (remoteLatest is not null && _store.IsNotOlder("codex-remote-0-latest.json", remoteLatest.Value.Time))
                 WriteCodexSnapshot("codex-remote-0-latest.json", remoteLatest.Value);
         }

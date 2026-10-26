@@ -47,8 +47,8 @@ internal static class SettingsDialog
         var claudeCli = AddGroupSelector(content, "Claude CLI", settings.ClaudeCliGroup, groupCodes);
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", settings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
-        // Used while no SSH source is listed below and config\remote.env supplies the host.
-        var defaultSsh = AddGroupSelector(content, "Codex SSH (config\\remote.env)", settings.FallbackCodexSshGroup, groupCodes);
+        // Used for the legacy remote snapshot while no SSH source is listed below.
+        var defaultSsh = AddGroupSelector(content, "Codex SSH (legacy cache)", settings.FallbackCodexSshGroup, groupCodes);
         AddSettingsSection(content, "Claude Desktop usage bridge");
         content.Children.Add(new TextBlock { Text = "After enabling Claude Desktop Developer Mode, enable this once and restart Claude Desktop so usage is injected automatically.", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
         var bridgeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
