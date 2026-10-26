@@ -14,7 +14,7 @@
 
 ## 日常啟動與帳號
 
-**Settings → Create / open Codex profile…** 建立的新視窗也會自動啟用全寬與標籤，watcher 明確指定該資料夾的 `codex` home。新資料夾在登入並產生本機用量紀錄前顯示未知。這不代表完整多帳號憑證隔離已驗證，詳見 [資料夾啟動](codex-account-profile.md)。
+**Settings → Codex account windows → Open** 開啟的已註冊帳號視窗也會自動啟用全寬與標籤，watcher 明確指定該資料夾的 `codex` home。新資料夾在登入並產生本機用量紀錄前顯示未知。這不代表完整多帳號憑證隔離已驗證，詳見 [資料夾啟動](codex-account-profile.md)。
 
 在專案根目錄雙擊 `Start-Codex-Session-Meter.cmd`。需要 Node.js 22+ 與目前 Windows 使用者已註冊的官方 Store Codex。啟動器自動找到最新安裝位置、使用 `.tools/codex-native-test-profile` 啟動或重用視窗、驗證 loopback 埠的程序與 profile 身份、取得當次 browser ID，再啟動 reader 與背景 watcher。重複啟動會替換同一個已驗證實例的 watcher，不強制關閉 Codex。按過 × 後再次雙擊啟動入口會重新啟用元件與全寬。
 

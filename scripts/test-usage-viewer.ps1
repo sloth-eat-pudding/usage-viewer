@@ -36,6 +36,8 @@ try {
 
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-claude-usage.ps1
   if ($LASTEXITCODE -ne 0) { throw 'Claude injector and HTTP bridge tests failed' }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-codex-account-registry.ps1
+  if ($LASTEXITCODE -ne 0) { throw 'Codex account registration tests failed' }
 
   & $DotNetPath run --project tests/UsageViewer.RegressionTests/UsageViewer.RegressionTests.csproj -c Release @restoreArguments
   if ($LASTEXITCODE -ne 0) { throw 'C# regression tests failed' }

@@ -46,9 +46,22 @@ internal static class SettingsDialog
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
         AddSettingsSection(content, "Codex account windows");
         content.Children.Add(new TextBlock { Text = "Choose a data folder for a Codex window with full width, cache timing and cost estimates (Node.js 22+).", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
-        var createCodex = new Button { Content = "Create / open Codex profile…", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 0, 8) };
+        var codexAccounts = new ComboBox { Width = 260, DisplayMemberPath = nameof(CodexAccountChoice.Name) };
+        void RefreshCodexAccounts()
+        {
+            var (accounts, selected) = ReadCodexAccounts();
+            codexAccounts.ItemsSource = accounts;
+            codexAccounts.SelectedItem = accounts.FirstOrDefault(account => account.Id == selected) ?? accounts.FirstOrDefault();
+        }
+        RefreshCodexAccounts();
+        codexAccounts.DropDownOpened += (_, _) => RefreshCodexAccounts();
+        var openCodex = new Button { Content = "Open", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
+        openCodex.Click += (_, _) => { if (codexAccounts.SelectedItem is CodexAccountChoice account) OpenCodexProfileCreator(dialog, account.Id); };
+        var createCodex = new Button { Content = "Manage accounts…", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
         createCodex.Click += (_, _) => OpenCodexProfileCreator(dialog);
-        content.Children.Add(createCodex);
+        var codexAccountRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        codexAccountRow.Children.Add(codexAccounts); codexAccountRow.Children.Add(openCodex); codexAccountRow.Children.Add(createCodex);
+        content.Children.Add(codexAccountRow);
         AddSettingsSection(content, "Claude Custom sources");
         AddEditorHeader(content, false);
         var customRows = new List<SourceEditor>(); var customList = new StackPanel(); content.Children.Add(customList);
@@ -88,7 +101,32 @@ internal static class SettingsDialog
         panel.Children.Add(new TextBlock { Text = title, Foreground = System.Windows.Media.Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 5) });
     }
 
-    private static void OpenCodexProfileCreator(Window owner)
+    private sealed record CodexAccountChoice(string Id, string Name);
+
+    private static (List<CodexAccountChoice> Accounts, string Selected) ReadCodexAccounts()
+    {
+        var accounts = new List<CodexAccountChoice>();
+        var selected = "account-1";
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(home, "codex-account-profile-ui.json")));
+            var root = document.RootElement;
+            if (root.TryGetProperty("selected_id", out var choice)) selected = choice.GetString() ?? selected;
+            if (root.TryGetProperty("profiles", out var profiles))
+                foreach (var profile in profiles.EnumerateArray())
+                {
+                    var id = profile.GetProperty("id").GetString();
+                    var name = profile.GetProperty("name").GetString();
+                    if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
+                }
+        }
+        catch { }
+        if (accounts.Count == 0) accounts.AddRange(new[] { new CodexAccountChoice("account-1", "Codex 1"), new CodexAccountChoice("account-2", "Codex 2") });
+        return (accounts, selected);
+    }
+
+    private static void OpenCodexProfileCreator(Window owner, string? profileId = null)
     {
         try
         {
@@ -97,6 +135,7 @@ internal static class SettingsDialog
             Directory.CreateDirectory(scripts);
             foreach (var (resourceName, filename) in new[] {
                 ("UsageViewer.CreateCodexAccountProfile.ps1", "create-codex-account-profile.ps1"),
+                ("UsageViewer.CodexAccountRegistry.ps1", "codex-account-registry.ps1"),
                 ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1"),
                 ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
                 ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs"),
@@ -108,6 +147,7 @@ internal static class SettingsDialog
             }
             var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
             foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);
+            if (profileId is not null) { start.ArgumentList.Add("-OpenProfileId"); start.ArgumentList.Add(profileId); }
             Process.Start(start);
         }
         catch (Exception error) { MessageBox.Show(owner, error.Message, "Codex account window", MessageBoxButton.OK, MessageBoxImage.Error); }

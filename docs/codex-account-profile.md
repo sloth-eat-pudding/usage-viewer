@@ -4,7 +4,11 @@
 
 ## 啟動
 
-在 Usage Viewer 的 Settings 按 **Create / open Codex profile…**，指定完整資料夾路徑，再按「建立／開啟」。新帳號選新資料夾；重開同一個視窗則選原資料夾。程式會記住上次路徑，並自動選擇可用的本機埠。同一個 profile 會沿用已記錄的埠。
+Usage Viewer 的 **Settings → Codex account windows** 提供帳號選單、**Open** 與 **Manage accounts…**。預設有 `Codex 1`、`Codex 2` 兩個專用資料夾，直接選帳號按 Open 即可，不需每次重選資料夾。
+
+在 Manage accounts… 選擇既有項目修改名稱／資料夾，或按「新增帳號」，然後按「儲存註冊」。註冊會立即保存，不需要再按外層 Settings 的 Save。重新開啟 Settings 或展開帳號選單時會讀取最新清單。帳號的名稱、資料夾及上次開啟的選項存於 `%USERPROFILE%\.usage-viewer\codex-account-profile-ui.json`（或 USAGE_VIEWER_HOME），不受顯示分組的 Save／Cancel 影響。舊版記住的單一資料夾會保留為 Codex 1。
+
+每個帳號只需註冊資料夾一次；同名或同資料夾的重複項目會被拒絕。登入仍由使用者在官方 Codex 視窗完成，是否需要重新驗證由 Codex 的登入狀態決定。程式自動選擇可用的本機埠，同一 profile 沿用已記錄的埠。
 
 此入口已同時加入 EXE 與腳本版 Settings；EXE 內嵌啟動腳本及用量元件，不需要另外下載專案。此入口是 Usage Viewer 的設定功能，實際開啟的是官方 Codex Desktop。原生標籤需要已安裝 Node.js 22+（支援 WebSocket）。
 

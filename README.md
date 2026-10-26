@@ -93,7 +93,7 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 ## Codex Desktop 原介面用量標籤（實驗）
 
-在 Usage Viewer 的 **Settings → Create / open Codex profile…** 選擇資料夾，即可建立或重開官方 Codex 視窗；程式會記住路徑、自動管理本機埠，並啟用全寬、目前聊天的快取命中率／粗估倒數及 API 標準價成本估算（需 Node.js 22+）。指令入口為 `Start-Codex-Account-Profile.cmd -ProfileRoot "D:\CodexProfiles\account-a" -Port 19336`。沒有此 profile 的本機用量紀錄時顯示未知。完整多帳號憑證隔離尚未驗證，詳細範圍見 [帳號資料夾實驗](docs/codex-account-profile.md)。
+在 Usage Viewer 的 **Settings → Codex account windows** 選帳號按 **Open**，即可建立或重開官方 Codex 視窗。預設有 `Codex 1`、`Codex 2`，可在 **Manage accounts…** 註冊名稱與資料夾，保存後不用每次重選。程式自動管理本機埠，並啟用全寬、目前聊天的快取命中率／粗估倒數及 API 標準價成本估算（需 Node.js 22+）。指令入口為 `Start-Codex-Account-Profile.cmd -ProfileRoot "D:\CodexProfiles\account-a" -Port 19336`。沒有此 profile 的本機用量紀錄時顯示未知。完整多帳號憑證隔離尚未驗證，詳細範圍見 [帳號資料夾實驗](docs/codex-account-profile.md)。
 
 雙擊 `Start-Codex-Session-Meter.cmd`，即可啟動附有全寬與用量標籤的官方 Codex 測試視窗。標籤顯示 5h／7d 已使用百分比、來源快取命中率，以及基於 API 預設 30 分鐘假設的粗估倒數；不是伺服器實際到期時間。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。此入口沿用目前帳號，尚未實測多帳號隔離。詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
 

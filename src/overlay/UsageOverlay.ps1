@@ -1390,9 +1390,9 @@ function Show-DisplaySettings {
   $dialog.Controls.Add($accountStatus)
 
   $codexProfileButton = New-Object System.Windows.Forms.Button
-  $codexProfileButton.Text = 'Create / open Codex profile...'
-  $codexProfileButton.Location = New-Object System.Drawing.Point(20, (455 + $desktopOffset))
-  $codexProfileButton.Size = New-Object System.Drawing.Size(310, 32)
+  $codexProfileButton.Text = 'Accounts...'
+  $codexProfileButton.Location = New-Object System.Drawing.Point(245, (455 + $desktopOffset))
+  $codexProfileButton.Size = New-Object System.Drawing.Size(85, 32)
   $codexProfileButton.Add_Click({
     try {
       $creator = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\scripts\create-codex-account-profile.ps1'))
@@ -1400,6 +1400,34 @@ function Show-DisplaySettings {
     } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Codex account window') }
   })
   $dialog.Controls.Add($codexProfileButton)
+  . ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\scripts\codex-account-registry.ps1')))
+  $codexAccounts = New-Object System.Windows.Forms.ComboBox
+  $codexAccounts.DisplayMember = 'name'
+  $codexAccounts.DropDownStyle = 'DropDownList'
+  $codexAccounts.Location = New-Object System.Drawing.Point(20, (458 + $desktopOffset))
+  $codexAccounts.Size = New-Object System.Drawing.Size(150, 28)
+  $refreshCodexAccounts = {
+    $registry = Read-CodexAccountRegistry (Join-Path $usageHome 'codex-account-profile-ui.json') (Join-Path $env:LOCALAPPDATA 'UsageViewer\CodexProfiles')
+    $codexAccounts.Items.Clear()
+    foreach ($account in $registry.profiles) { [void]$codexAccounts.Items.Add($account) }
+    foreach ($account in $codexAccounts.Items) { if ($account.id -eq $registry.selected_id) { $codexAccounts.SelectedItem = $account; break } }
+  }
+  & $refreshCodexAccounts
+  $codexAccounts.Add_DropDown($refreshCodexAccounts)
+  $dialog.Controls.Add($codexAccounts)
+  $openCodexAccount = New-Object System.Windows.Forms.Button
+  $openCodexAccount.Text = 'Open'
+  $openCodexAccount.Location = New-Object System.Drawing.Point(175, (455 + $desktopOffset))
+  $openCodexAccount.Size = New-Object System.Drawing.Size(65, 32)
+  $openCodexAccount.Add_Click({
+    try {
+      if (!$codexAccounts.SelectedItem) { return }
+      $id = $codexAccounts.SelectedItem.id
+      $creator = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\scripts\create-codex-account-profile.ps1'))
+      Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$creator`" -OpenProfileId $id" -WindowStyle Hidden
+    } catch { [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Codex account window') }
+  })
+  $dialog.Controls.Add($openCodexAccount)
 
   $save = New-Object System.Windows.Forms.Button
   $save.Text = "Save"
@@ -1419,7 +1447,7 @@ function Show-DisplaySettings {
   $save.FlatAppearance.BorderSize = 0
   $save.BackColor = [System.Drawing.Color]::FromArgb(45, 75, 105)
   $save.ForeColor = [System.Drawing.Color]::White
-  foreach ($button in @($openEnvironment, $codexProfileButton)) {
+  foreach ($button in @($openEnvironment, $codexProfileButton, $openCodexAccount)) {
     $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $button.FlatAppearance.BorderSize = 0
     $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 45)
