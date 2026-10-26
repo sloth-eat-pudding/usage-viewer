@@ -2,6 +2,16 @@
 
 這個元件直接掛載到官方 Desktop 主頁 `app://-/index.html` 的 composer 容器，不是網頁分頁、iframe 或獨立浮窗。它顯示本機 `codex-desktop-latest.json` 的 5h／7d **已使用**百分比，資料超過五分鐘、時間異常或缺失時標示較舊／未知。來源可能是其他 Desktop 聊天；它不是目前聊天的專屬額度。
 
+版本 `0.2.0` 也將聊天內容與輸入區的最大寬度放寬到各自容器的 100%，保留原生留白、側欄與分割區邊界。只調整已觀測到的 thread 欄寬 class，不修改整個應用程式的對話框或所有 `max-width`。新聊天與路由切換也會套用；關閉元件會一併移除樣式、還原原始寬度。
+
+## 快取資料的可見範圍
+
+標籤顯示「來源快取命中」與「期限未知」。命中率採用本機 reader 快照的 `percentages.cached_input`，也就是來源最近一次輸入的 cached input / input tokens；不是快取剩餘時間，也不是目前畫面聊天的專屬數值。
+
+實測 Desktop token-count 紀錄包含 `cached_input_tokens` 與 `cache_write_input_tokens`，但未提供 TTL 或 `expires_at`，因此目前沒有可靠的精確到期倒數。沒有命中率資料時顯示 `—`，不當成零。
+
+[OpenAI API 的 prompt caching 文件](https://developers.openai.com/api/docs/guides/prompt-caching)描述了不同模型與設定下的快取保留行為；API 的預設值不能直接當成這次 Codex Desktop 請求的實際設定或精確到期時間。元件不猜測固定 5m／30m／1h，也不發送保溫請求。
+
 ## 已實測環境
 
 - 日期：2026-10-26。
@@ -25,7 +35,7 @@ node scripts/codex-native-meter.cjs --port 19335 --browser-id <verified-browser-
 
 ## 移除與還原
 
-- 點標籤旁的 ×，該 renderer 的標籤與 observer 立即移除；watch 不會推翻關閉動作。重載頁面後才會重新安裝。
+- 點標籤旁的 ×，該 renderer 的標籤、全寬樣式與 observer 立即移除；watch 不會推翻關閉動作。重載頁面後才會重新安裝。
 - 或對同一個已驗證端點執行：
 
 ```powershell

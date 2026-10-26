@@ -10,7 +10,8 @@ function readNativeSnapshot(directory) {
     return {
       observed_at: typeof data.observed_at === 'string' ? data.observed_at : null,
       five_hour_used: percent(data.percentages?.five_hour_used),
-      seven_day_used: percent(data.percentages?.seven_day_used)
+      seven_day_used: percent(data.percentages?.seven_day_used),
+      cached_input: percent(data.percentages?.cached_input)
     }
   } catch { return null }
 }

@@ -10,8 +10,10 @@ test('native snapshots minimize data and distinguish zero from unknown', () => {
     assert.equal(readNativeSnapshot(directory), null)
     const file = path.join(directory, 'codex-desktop-latest.json')
     fs.writeFileSync(file, JSON.stringify({ session: { id: 'PRIVATE' }, source_file: 'PRIVATE',
-      percentages: { five_hour_used: 0, seven_day_used: 101 } }))
-    assert.deepEqual(readNativeSnapshot(directory), { observed_at: null, five_hour_used: 0, seven_day_used: null })
+      percentages: { five_hour_used: 0, seven_day_used: 101, cached_input: 0 } }))
+    assert.deepEqual(readNativeSnapshot(directory), { observed_at: null, five_hour_used: 0, seven_day_used: null, cached_input: 0 })
+    fs.writeFileSync(file, JSON.stringify({ percentages: { cached_input: '100' } }))
+    assert.equal(readNativeSnapshot(directory).cached_input, null)
     fs.writeFileSync(file, '{')
     assert.equal(readNativeSnapshot(directory), null)
   } finally { fs.rmSync(directory, { recursive: true, force: true }) }
