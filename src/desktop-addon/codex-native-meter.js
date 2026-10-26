@@ -2,7 +2,7 @@
 (() => {
   'use strict'
   const key = '__usageViewerCodexNativeMeter'
-  const version = '0.3.0'
+  const version = '0.4.0'
   const previous = window[key]
   if (previous?.version === version || previous?.status().stopped) return
   previous?.destroy()
@@ -12,17 +12,37 @@
   let label = null
   let layoutStyle = null
   const percent = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? `${Math.round(value)}%` : '—'
+  function threadId() {
+    const editors = [...document.querySelectorAll('[data-codex-composer][contenteditable="true"]')]
+      .filter(e => e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)
+    if (editors.length !== 1) return null
+    let element = editors[0]
+    while (element && !Object.keys(element).some(k => k.startsWith('__reactFiber$'))) element = element.parentElement
+    let fiber = element?.[Object.keys(element).find(k => k.startsWith('__reactFiber$'))]
+    let root = fiber
+    for (let i = 0; root?.return && i < 250; i++) root = root.return
+    if (root?.stateNode?.current && root.stateNode.current !== root) fiber = fiber?.alternate
+    const ids = new Set()
+    for (let i = 0; fiber && i < 150; i++, fiber = fiber.return) {
+      const id = fiber.memoizedProps?.threadId || fiber.memoizedProps?.conversationId
+      if (typeof id === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)) ids.add(id)
+    }
+    return ids.size === 1 ? [...ids][0] : null
+  }
   function render() {
     if (stopped || !label) return
+    if (snapshot && snapshot.thread_id !== threadId()) snapshot = null
     const observed = Date.parse(snapshot?.observed_at || '')
     const stale = !Number.isFinite(observed) || Date.now() - observed > 300000 || observed > Date.now() + 60000
     const expiry = snapshot?.cache_estimate?.assumed_ttl_seconds === 1800 ? Date.parse(snapshot.cache_estimate.expires_at) : NaN
     const seconds = Number.isFinite(expiry) ? Math.max(0, Math.ceil((expiry - Date.now()) / 1000)) : null
     const cacheTime = seconds === null ? '快取時間未知' : seconds === 0 ? '30m估算窗已過' :
       `快取≈${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}（假設30m）`
-    const text = `用量  5h ${percent(snapshot?.five_hour_used)}  ·  7d ${percent(snapshot?.seven_day_used)}  ·  來源快取命中 ${percent(snapshot?.cached_input)}  ·  ${cacheTime}${stale ? '  ·  資料較舊或未知' : ''}`
+    const cost = typeof snapshot?.cost_usd === 'number' && Number.isFinite(snapshot.cost_usd) && snapshot.cost_usd >= 0
+      ? `成本≈US$${snapshot.cost_usd.toFixed(4)}（API標準價）` : '成本未知'
+    const text = `用量  5h ${percent(snapshot?.five_hour_used)}  ·  7d ${percent(snapshot?.seven_day_used)}  ·  快取命中 ${percent(snapshot?.cached_input)}  ·  ${cacheTime}  ·  ${cost}${stale ? '  ·  資料較舊或未知' : ''}`
     if (label.textContent !== text) label.textContent = text
-    row.title = 'Usage Viewer 試作 · 額度為已使用百分比\n來源：最近有用量紀錄的 Desktop session，可能是其他聊天\n快取命中率為該來源最近一次輸入的 cached input / input tokens。\n倒數以來源觀測時間加 API 預設 30 分鐘粗估；未確認 Desktop 的實際快取設定。歸零不代表伺服器快取已失效，正值也不保證下次命中。\n觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
+    row.title = 'Usage Viewer · 額度為已使用百分比\n來源：目前聊天在此 profile 的本機用量紀錄；無法配對時顯示未知。\n成本依各次模型與累計 token 差額，按 2026-10-26 API 標準價格估算，GPT-6 已含長上下文倍率；非訂閱帳單，不含子代理、工具費、速度與區域加價。未知價格、快取寫入費或紀錄不全顯示未知。\n倒數以最後用量事件加 API 預設 30 分鐘粗估，非 Desktop 實際到期時間。\n觀測時間：' + (Number.isFinite(observed) ? new Date(observed).toLocaleString() : '未知')
     row.style.opacity = stale ? '0.65' : '1'
   }
   function mount() {
@@ -78,6 +98,7 @@
   }
   window[key] = {
     version,
+    threadId,
     update(value) { if (!stopped) { snapshot = value; mount(); render() } },
     destroy,
     status() { return { stopped, mounted: !!row?.isConnected, fullWidth: !!layoutStyle?.isConnected, version, count: document.querySelectorAll('[data-usage-viewer-native-meter]').length } }

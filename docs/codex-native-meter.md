@@ -1,18 +1,20 @@
 # Codex Desktop 原介面用量標籤：實驗紀錄
 
-這個元件直接掛載到官方 Desktop 主頁 `app://-/index.html` 的 composer 容器，不是網頁分頁、iframe 或獨立浮窗。它顯示本機 `codex-desktop-latest.json` 的 5h／7d **已使用**百分比，資料超過五分鐘、時間異常或缺失時標示較舊／未知。來源可能是其他 Desktop 聊天；它不是目前聊天的專屬額度。
+這個元件直接掛載到官方 Desktop 主頁 `app://-/index.html` 的 composer 容器，不是網頁分頁、iframe 或獨立浮窗。版本 `0.4.0` 依輸入框 React 元件上的目前聊天 ID，配對指定 `CODEX_HOME/sessions` 內唯一且 metadata ID 相符的本機紀錄。只把最小用量資料傳回 renderer，不讀取登入憑證或 renderer 的對話文字。無法配對、分割輸入框不唯一或 profile 沒有紀錄時顯示未知，絕不借用其他聊天或 profile 的數值。5h／7d 為該紀錄回報的帳號額度已使用百分比；資料超過五分鐘會標示較舊。
 
 版本 `0.2.0` 也將聊天內容與輸入區的最大寬度放寬到各自容器的 100%，保留原生留白、側欄與分割區邊界。只調整已觀測到的 thread 欄寬 class，不修改整個應用程式的對話框或所有 `max-width`。新聊天與路由切換也會套用；關閉元件會一併移除樣式、還原原始寬度。
 
 ## 快取資料的可見範圍
 
-版本 `0.3.0` 顯示「來源快取命中」與使用者要求的粗估倒數，例如「快取≈28:12（假設30m）」。命中率採用本機 reader 快照的 `percentages.cached_input`，也就是來源最近一次輸入的 cached input / input tokens；不是目前畫面聊天的專屬數值。
+版本 `0.4.0` 顯示目前聊天最近一次輸入的 cached input / input tokens，以及使用者要求的粗估倒數，例如「快取≈28:12（假設30m）」。只更新額度、但累計 token 沒有增加的事件，不會延長倒數；切換聊天時立即清除配對不符的資料。
 
 實測 Desktop token-count 紀錄包含 `cached_input_tokens` 與 `cache_write_input_tokens`，但未提供 TTL 或 `expires_at`。針對 GPT-5.6 之後的模型，若該筆來源用量紀錄有快取讀／寫，粗估窗口採用 `observed_at + 30 分鐘`，每秒顯示倒數。輪詢與重開程式不會延長同一筆事件的窗口。模型不符合、沒有快取使用紀錄或時間不合理時顯示未知；沒有命中率資料時顯示 `—`，不當成零。
 
 [OpenAI API 的 prompt caching 文件](https://developers.openai.com/api/docs/guides/prompt-caching)描述了 GPT-5.6 之後模型預設 30 分鐘的最低快取窗口及讀取刷新行為。這裡只是借用該預設值作假設，未驗證 Desktop 的實際設定、伺服器讀寫時刻或各 prefix 的生命週期。來源事件時間也可能晚於請求開始時間。歸零顯示「30m估算窗已過」，不宣稱快取已失效；正值也不保證下次命中。元件不發送保溫請求。
 
 ## 日常啟動與帳號
+
+**Settings → Create / open Codex profile…** 建立的新視窗也會自動啟用全寬與標籤，watcher 明確指定該資料夾的 `codex` home。新資料夾在登入並產生本機用量紀錄前顯示未知。這不代表完整多帳號憑證隔離已驗證，詳見 [資料夾啟動](codex-account-profile.md)。
 
 在專案根目錄雙擊 `Start-Codex-Session-Meter.cmd`。需要 Node.js 22+ 與目前 Windows 使用者已註冊的官方 Store Codex。啟動器自動找到最新安裝位置、使用 `.tools/codex-native-test-profile` 啟動或重用視窗、驗證 loopback 埠的程序與 profile 身份、取得當次 browser ID，再啟動 reader 與背景 watcher。重複啟動會替換同一個已驗證實例的 watcher，不強制關閉 Codex。按過 × 後再次雙擊啟動入口會重新啟用元件與全寬。
 
@@ -41,7 +43,13 @@
 node scripts/codex-native-meter.cjs --port 19335 --browser-id <verified-browser-id> --watch
 ```
 
-不加 `--watch` 只更新一次；watch 每五秒讀取本機快照。只處理主介面的 `app://-/index.html`，不注入瀏覽器網頁、iframe、寵物輸入框或其他來源。資料從 driver 傳入，不從 renderer 讀取 auth、對話文字或呼叫內部 API。若 composer 不唯一或結構不符合預期，元件不顯示。
+不加 `--watch` 只更新一次；watch 每五秒配對目前聊天的本機 session。可加 `--codex-home <profile 的 codex 目錄>`，省略時使用程序的 CODEX_HOME 或預設目錄。只處理主介面的 `app://-/index.html`，不注入瀏覽器網頁、iframe、寵物輸入框或其他來源。若 composer 不唯一或結構不符合預期，元件不顯示。
+
+## 成本估算
+
+依 [OpenAI API 價格](https://developers.openai.com/api/docs/pricing)（2026-10-26）換算 GPT-6.1 Sol、GPT-6 Astra、GPT-6 Luna 與 GPT-5.6 Sol 的輸入、快取輸入及輸出 token。按事件當時的模型計算累計計數差額，避免重複加總；reasoning output 已包含在 output，不額外相加。GPT-6 三個模型的每次輸入超過 272K 時，輸入與快取輸入為短上下文價的 2 倍、輸出為 1.5 倍。
+
+標籤明示「API標準價」，不是訂閱實付金額；不含子代理、工具費、Fast／Ultrafast 與區域加價。未知模型、累計計數倒退、紀錄不完整、無法確定的快取寫入費，以及未收錄價格的長上下文會顯示成本未知。未知不視為免費。輪詢不發送模型請求。
 
 ## 移除與還原
 

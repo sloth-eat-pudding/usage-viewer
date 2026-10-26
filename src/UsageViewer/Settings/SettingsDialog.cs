@@ -45,7 +45,7 @@ internal static class SettingsDialog
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", settings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
         AddSettingsSection(content, "Codex account windows");
-        content.Children.Add(new TextBlock { Text = "Choose a data folder to create or reopen a Codex sign-in window.", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        content.Children.Add(new TextBlock { Text = "Choose a data folder for a Codex window with full width, cache timing and cost estimates (Node.js 22+).", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
         var createCodex = new Button { Content = "Create / open Codex profile…", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 0, 8) };
         createCodex.Click += (_, _) => OpenCodexProfileCreator(dialog);
         content.Children.Add(createCodex);
@@ -97,11 +97,14 @@ internal static class SettingsDialog
             Directory.CreateDirectory(scripts);
             foreach (var (resourceName, filename) in new[] {
                 ("UsageViewer.CreateCodexAccountProfile.ps1", "create-codex-account-profile.ps1"),
-                ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1") })
+                ("UsageViewer.StartCodexAccountProfile.ps1", "start-codex-account-profile.ps1"),
+                ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
+                ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs"),
+                ("UsageViewer.CodexNativeMeter.js", "codex-native-meter.js") })
             {
                 using var resource = typeof(SettingsDialog).Assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidDataException($"Missing {resourceName}");
                 using var reader = new StreamReader(resource);
-                File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(true));
+                File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(filename.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)));
             }
             var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
             foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);

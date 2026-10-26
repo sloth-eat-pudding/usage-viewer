@@ -53,7 +53,7 @@ $browse.Add_Click({
   try { if ($picker.ShowDialog($dialog) -eq 'OK') { $folder.Text = $picker.SelectedPath } } finally { $picker.Dispose() }
 })
 $description = New-Object System.Windows.Forms.Label
-$description.Text = '新資料夾會開啟登入／選擇帳戶畫面。每個帳號使用不同資料夾；登入由你操作，其他 Codex 視窗會保持開啟。'
+$description.Text = '新資料夾會開啟登入畫面。登入後自動啟用全寬、快取時間與成本估算；尚無此視窗的用量紀錄時顯示未知。'
 $description.SetBounds(20, 94, 550, 48)
 $description.ForeColor = [System.Drawing.Color]::LightGray
 $dialog.Controls.Add($description)

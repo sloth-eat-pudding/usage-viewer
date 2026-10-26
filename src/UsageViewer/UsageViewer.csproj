@@ -16,6 +16,9 @@
     <EmbeddedResource Include="..\desktop-addon\claude-session-meter.js" LogicalName="UsageViewer.ClaudeSessionMeter.js" />
     <EmbeddedResource Include="..\..\scripts\create-codex-account-profile.ps1" LogicalName="UsageViewer.CreateCodexAccountProfile.ps1" />
     <EmbeddedResource Include="..\..\scripts\start-codex-account-profile.ps1" LogicalName="UsageViewer.StartCodexAccountProfile.ps1" />
+    <EmbeddedResource Include="..\..\scripts\codex-native-meter.cjs" LogicalName="UsageViewer.CodexNativeDriver.cjs" />
+    <EmbeddedResource Include="..\..\scripts\codex-profile-metrics.cjs" LogicalName="UsageViewer.CodexProfileMetrics.cjs" />
+    <EmbeddedResource Include="..\desktop-addon\codex-native-meter.js" LogicalName="UsageViewer.CodexNativeMeter.js" />
     <None Include="..\..\scripts\sync-codex-remote.ps1" Link="scripts\sync-codex-remote.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
     <!-- remote.env is an optional, machine-specific file and is gitignored. -->
     <None Include="..\..\config\remote.env" Link="config/remote.env" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" Condition="Exists('..\..\config\remote.env')" />

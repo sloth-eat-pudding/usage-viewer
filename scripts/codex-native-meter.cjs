@@ -2,6 +2,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
+const { readSession } = require('./codex-profile-metrics.cjs')
 
 function estimateCacheWindow(data, now = Date.now()) {
   const model = /^gpt-(\d+)(?:\.(\d+))?(?:-|$)/i.exec(data.model?.id || data.model?.name || '')
@@ -38,6 +39,7 @@ function options(argv) {
     else if (arg === '--watch') result.mode = 'watch'
     else if (arg === '--remove') result.mode = 'remove'
     else if (arg === '--reinstall') result.reinstall = true
+    else if (arg === '--codex-home') result.codexHome = path.resolve(argv[++i])
     else throw new Error(`Unknown argument: ${arg}`)
   }
   if (!Number.isInteger(result.port) || result.port < 1024 || result.port > 65535 ||
@@ -102,16 +104,22 @@ async function run(config) {
     if (target.type !== 'page') return false
     try { const url = new URL(target.url); return url.protocol === 'app:' && url.host === '-' && url.pathname === '/index.html' } catch { return false }
   })
-  const snapshot = readNativeSnapshot(process.env.USAGE_VIEWER_HOME || path.join(os.homedir(), '.usage-viewer'))
-  const payload = fs.readFileSync(path.join(__dirname, '../src/desktop-addon/codex-native-meter.js'), 'utf8')
+  const localPayload = path.join(__dirname, 'codex-native-meter.js')
+  const payload = fs.readFileSync(fs.existsSync(localPayload) ? localPayload : path.join(__dirname, '../src/desktop-addon/codex-native-meter.js'), 'utf8')
   let mounted = 0
   for (const target of targets) {
     const client = await connect(debuggerUrl(target.webSocketDebuggerUrl, config.port, 'page').href)
     try {
-      // No app text, auth tokens, account data or session contents are requested.
+      // Only the active thread ID is read from the renderer, never text or credentials.
       const reset = config.reinstall ? 'window.__usageViewerCodexNativeMeter?.destroy();delete window.__usageViewerCodexNativeMeter;' : ''
+      if (config.mode !== 'remove') await client.send('Runtime.evaluate', { expression: `${reset}${payload}` })
+      const active = config.mode === 'remove' ? null : await client.send('Runtime.evaluate', {
+        expression: 'window.__usageViewerCodexNativeMeter.threadId()', returnByValue: true })
+      const threadId = active?.result?.value || null
+      const data = readSession(config.codexHome || process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), threadId)
+      const snapshot = data ? { ...data, model: undefined, tokens: undefined, cache_estimate: estimateCacheWindow(data), thread_id: threadId } : null
       const expression = config.mode === 'remove' ? 'window.__usageViewerCodexNativeMeter?.destroy()' :
-        `${reset}${payload}\n;window.__usageViewerCodexNativeMeter.update(${JSON.stringify(snapshot)});window.__usageViewerCodexNativeMeter.status()`
+        `window.__usageViewerCodexNativeMeter.update(${JSON.stringify(snapshot)});window.__usageViewerCodexNativeMeter.status()`
       const result = await client.send('Runtime.evaluate', { expression, returnByValue: true })
       if (result.exceptionDetails) throw new Error('Renderer rejected the meter payload')
       if (result.result?.value?.mounted) {
@@ -132,10 +140,13 @@ async function main() {
   console.log(JSON.stringify(await run(config)))
   config.reinstall = false
   if (config.mode === 'watch') {
+    let failures = 0
     const timer = setInterval(async () => {
       if (main.pending) return
       main.pending = true
-      try { await run(config) } catch (error) { clearInterval(timer); console.error(error.message); process.exitCode = 1 }
+      try { await run(config); failures = 0 } catch (error) {
+        if (++failures >= 6) { clearInterval(timer); console.error(error.message); process.exitCode = 1 }
+      }
       finally { main.pending = false }
     }, 5000)
   }

@@ -9,6 +9,10 @@ $desktop = Join-Path $root 'desktop'
 $codex = Join-Path $root 'codex'
 $usage = Join-Path $root 'usage'
 $runtime = Join-Path $root 'runtime'
+$driver = Join-Path $PSScriptRoot 'codex-native-meter.cjs'
+$node = (Get-Command node.exe -ErrorAction Stop).Source
+if (!(Test-Path -LiteralPath $driver) -or !(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'codex-profile-metrics.cjs'))) { throw 'Codex meter files are missing. Update Usage Viewer.' }
+if ((& $node -p 'typeof WebSocket') -ne 'function') { throw 'Codex meter requires Node.js 22 or later with WebSocket support.' }
 $package = Get-AppxPackage -Name OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1
 if (!$package -or $package.SignatureKind -ne 'Store' -or $package.IsDevelopmentMode) { throw 'Official Codex Store package required.' }
 $exe = Join-Path $package.InstallLocation 'app\ChatGPT.exe'
@@ -68,9 +72,32 @@ try {
       $socket.AbsolutePath -notmatch '^/devtools/browser/([a-fA-F0-9-]{36})$') { throw 'Unexpected CDP endpoint.' }
   $state = @{ schema = 1; app_pid = $listener; browser_id = $Matches[1]; port = $Port;
     profile_root = $root; desktop = $desktop; codex_home = $codex; usage_home = $usage; package_version = "$($package.Version)" }
-  $state | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $runtime 'state.json') -Encoding UTF8
+  $browserId = $state.browser_id
+  # Replace only the watcher attached to this verified browser and driver.
+  Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" | Where-Object {
+    $_.ExecutablePath -ieq $node -and $_.CommandLine -and
+    $_.CommandLine.Replace('/', '\').Contains($driver) -and
+    $_.CommandLine.Contains($browserId) -and $_.CommandLine -match '(?:^|\s)--watch(?:\s|$)'
+  } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+  & $node $driver --port $Port --browser-id $browserId --codex-home $codex --reinstall
+  if ($LASTEXITCODE -ne 0) { throw 'Codex meter installation failed.' }
+  $watcher = Start-Process -FilePath $node -ArgumentList "`"$driver`" --port $Port --browser-id $browserId --codex-home `"$codex`" --watch" `
+    -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtime 'meter.stdout.log') `
+    -RedirectStandardError (Join-Path $runtime 'meter.stderr.log')
+  Start-Sleep -Milliseconds 750
+  if ($watcher.HasExited) { throw 'Codex meter watcher exited. See runtime/meter.stderr.log.' }
+  $state.watcher_pid = $watcher.Id
+  $statePath = Join-Path $runtime 'state.json'
+  $temporaryState = Join-Path $runtime ([Guid]::NewGuid().ToString('N') + '.tmp')
+  try {
+    [IO.File]::WriteAllText($temporaryState, ($state | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    for ($attempt = 0; ; $attempt++) {
+      try { Move-Item -LiteralPath $temporaryState -Destination $statePath -Force; break }
+      catch [IO.IOException] { if ($attempt -ge 9) { throw }; Start-Sleep -Milliseconds 200 }
+    }
+  } finally { if (Test-Path -LiteralPath $temporaryState) { Remove-Item -LiteralPath $temporaryState -Force } }
   Write-Output "Separate Codex profile is open. Profile root: $root"
-  Write-Output 'Login-screen experiment only: no shared reader or usage snapshot is attached. Stop at sign-in when testing.'
+  Write-Output 'Full-width and session metrics are enabled. Metrics appear after sign-in and local usage events; no shared account snapshot is used.'
 } finally {
   if ($locked) { $lock.ReleaseMutex() }
   $lock.Dispose()
