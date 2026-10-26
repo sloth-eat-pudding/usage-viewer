@@ -8,11 +8,12 @@ $ast = [Management.Automation.Language.Parser]::ParseFile(
 if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 foreach ($function in $ast.FindAll({ param($node)
   $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-  $node.Name -in @('Resize-OverlayToContent', 'Resize-UsageColumns', 'Measure-TextWidth')
+  $node.Name -in @('Resize-OverlayToContent', 'Resize-UsageColumns', 'Measure-TextWidth', 'Measure-MultilineTextSize')
 }, $false)) { Invoke-Expression $function.Extent.Text }
 
 function Assert-True { param($Value, $Message) if (-not $Value) { throw $Message } }
 $combinedMode = $true
+$script:DisplayLayout = 'columns'
 $script:IsPinned = $false
 $script:usageColumnControls = @()
 $mouseDown = {}; $mouseMove = {}; $mouseUp = {}
@@ -22,6 +23,9 @@ $main = New-Object System.Windows.Forms.Label
 $detail = New-Object System.Windows.Forms.Label
 $form.Controls.Add($main)
 $form.Controls.Add($detail)
+$form.ShowInTaskbar = $false
+$form.Opacity = 0
+$form.Show()
 try {
   $main.Text = (@('A  5h 10%  7d 20% (D)', 'A  5h 30%  7d 40% (S)', 'O  5h 50%  7d 60% (D+C)', 'O  5h 70%  7d 80% (R)') -join "`n")
   $detail.Text = ((1..4 | ForEach-Object { "Reset in 4h / 6d | now (source $_)" }) -join "`n")
@@ -36,7 +40,15 @@ try {
     Assert-True ($column.Main.Left -ge $previousRight) 'Columns must not overlap'
     $previousRight = $column.Main.Right
   }
-  Assert-True ($form.ClientSize.Width -ge $previousRight + 128) 'Controls must not cover the last column'
+  Assert-True ($form.ClientSize.Width -ge $previousRight + 66) 'Controls must not cover the last column'
+  $script:DisplayLayout = 'stacked'
+  $oldColumn = $script:usageColumnControls[0].Main
+  Resize-OverlayToContent -Form $form -Main $main -Detail $detail
+  Assert-True ($form.ClientSize.Height -gt $height) 'Stacked mode must display all groups vertically'
+  Assert-True ($main.Visible -and $detail.Visible -and $oldColumn.IsDisposed) 'Switching to stacked mode must restore the text labels and dispose column controls'
+  $script:DisplayLayout = 'columns'
+  Resize-OverlayToContent -Form $form -Main $main -Detail $detail
+  Assert-True ($form.ClientSize.Height -eq $height -and $script:usageColumnControls.Count -eq 4) 'Switching back must restore two rows and all groups'
   $removed = $script:usageColumnControls[-1].Main
   $main.Text = 'Waiting for Claude / Codex usage...'
   $detail.Text = ''

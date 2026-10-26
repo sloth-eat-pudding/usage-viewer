@@ -27,17 +27,6 @@ public class ResizableOverlayForm : Form
   public static bool ClickThrough { get; set; }
   public static Rectangle UnlockButtonBounds { get; set; }
   private const int WM_NCHITTEST = 0x84;
-  private const int HTCLIENT = 1;
-  private const int HTLEFT = 10;
-  private const int HTRIGHT = 11;
-  private const int HTTOP = 12;
-  private const int HTTOPLEFT = 13;
-  private const int HTTOPRIGHT = 14;
-  private const int HTBOTTOM = 15;
-  private const int HTBOTTOMLEFT = 16;
-  private const int HTBOTTOMRIGHT = 17;
-  private const int GripSize = 8;
-
   protected override void WndProc(ref Message message)
   {
     if (ClickThrough && message.Msg == WM_NCHITTEST)
@@ -50,25 +39,6 @@ public class ResizableOverlayForm : Form
     }
     base.WndProc(ref message);
 
-    if (message.Msg != WM_NCHITTEST || (int)message.Result != HTCLIENT)
-    {
-      return;
-    }
-
-    Point cursor = PointToClient(Cursor.Position);
-    bool left = cursor.X <= GripSize;
-    bool right = cursor.X >= ClientSize.Width - GripSize;
-    bool top = cursor.Y <= GripSize;
-    bool bottom = cursor.Y >= ClientSize.Height - GripSize;
-
-    if (left && top) message.Result = (IntPtr)HTTOPLEFT;
-    else if (right && top) message.Result = (IntPtr)HTTOPRIGHT;
-    else if (left && bottom) message.Result = (IntPtr)HTBOTTOMLEFT;
-    else if (right && bottom) message.Result = (IntPtr)HTBOTTOMRIGHT;
-    else if (left) message.Result = (IntPtr)HTLEFT;
-    else if (right) message.Result = (IntPtr)HTRIGHT;
-    else if (top) message.Result = (IntPtr)HTTOP;
-    else if (bottom) message.Result = (IntPtr)HTBOTTOM;
   }
 }
 
@@ -133,6 +103,7 @@ $script:ShowCodexDesktop = $true
 $script:ShowCodexCli = $true
 $script:ShowSsh = $true
 $script:MergeCodex = $false
+$script:DisplayLayout = "columns"
 $script:ClaudeDesktopGroup = "1"
 $script:ClaudeDesktopSources = @()
 $script:ClaudeCliGroup = "1"
@@ -147,6 +118,7 @@ $script:ClaudeUserEnvironment = "default"
 if (Test-Path -LiteralPath $displaySettingsFile) {
   try {
     $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
+    $script:DisplayLayout = if ($savedSettings.display_layout -eq "stacked") { "stacked" } else { "columns" }
     if ($null -ne $savedSettings.show_claude_desktop) { $script:ShowClaudeDesktop = [bool]$savedSettings.show_claude_desktop }
     if ($null -ne $savedSettings.show_claude_cli) { $script:ShowClaudeCli = [bool]$savedSettings.show_claude_cli }
     if ($null -ne $savedSettings.merge_claude) { $script:MergeClaude = [bool]$savedSettings.merge_claude }
@@ -255,25 +227,6 @@ $panel.Dock = [System.Windows.Forms.DockStyle]::Fill
 $panel.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $form.Controls.Add($panel)
 
-$resetButton = New-Object System.Windows.Forms.Button
-$resetButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-$resetButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$resetButton.FlatAppearance.BorderSize = 0
-$resetButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
-$resetButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
-$resetButton.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
-$resetButton.Location = New-Object System.Drawing.Point(286, 2)
-$resetButton.Size = New-Object System.Drawing.Size(20, 20)
-$resetButton.Text = "R"
-$resetButton.TabStop = $false
-$resetButton.Add_Click({
-  $form.Size = $defaultWindowSize
-  $script:showCost = $false
-  $script:heightBeforeCostExpand = $null
-  Update-UsageView -CombinedMode $combinedMode -UsageFile $claudeUsageFile -ClaudeUsageFile $claudeUsageFile -CodexUsageFile $codexUsageFile -Title $title -Main $main -Detail $detail -CostToggle $costToggle
-  Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
-})
-$panel.Controls.Add($resetButton)
 
 $script:IsPinned = $false
 $script:pinHotkeyWasDown = $false
@@ -300,8 +253,8 @@ $settingsButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $settingsButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $settingsButton.Font = New-Object System.Drawing.Font("Segoe UI", 7, [System.Drawing.FontStyle]::Bold)
 $settingsButton.Location = New-Object System.Drawing.Point(234, 2)
-$settingsButton.Size = New-Object System.Drawing.Size(50, 20)
-$settingsButton.Text = "Settings"
+$settingsButton.Size = New-Object System.Drawing.Size(20, 20)
+$settingsButton.Text = "S"
 $settingsButton.TabStop = $false
 $settingsButton.Add_Click({
   if (-not (Show-SharedDisplaySettings)) { Show-DisplaySettings }
@@ -334,7 +287,6 @@ $applyPinState = {
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
   $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
-  $resetButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
   $costToggle.Enabled = -not $script:IsPinned
   # U mode keeps the background click-through while the unlock button remains
@@ -396,11 +348,11 @@ $script:heightBeforeCostExpand = $null
 $script:usageColumnControls = @()
 
 $layoutOverlay = {
-  $width = [Math]::Max(80, $panel.ClientSize.Width - 135)
+  $width = [Math]::Max(80, $panel.ClientSize.Width - 73)
   $main.Width = $width
   $detail.Width = $width
-  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 128 }
-  $resetButton.Left = $panel.ClientSize.Width - 44
+  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 66 }
+  $settingsButton.Left = $panel.ClientSize.Width - 44
   $closeButton.Left = $panel.ClientSize.Width - 22
 }
 
@@ -414,19 +366,6 @@ $mouseDown = {
     if ($script:IsPinned) {
       return
     }
-    $hitTest = Get-ResizeHitTest -Form $form
-
-    if ($hitTest -ne 0) {
-      [OverlayWindowInterop]::ReleaseCapture() | Out-Null
-      [OverlayWindowInterop]::SendMessage(
-        $form.Handle,
-        [OverlayWindowInterop]::WM_NCLBUTTONDOWN,
-        $hitTest,
-        0
-      ) | Out-Null
-      return
-    }
-
     $script:dragging = $true
     $script:dragStart = $_.Location
   }
@@ -458,54 +397,6 @@ $closeItem.Add_Click({ $form.Close() })
 $form.ContextMenuStrip = $menu
 $panel.ContextMenuStrip = $menu
 
-function Get-ResizeHitTest {
-  param([System.Windows.Forms.Form]$Form)
-
-  if ($script:IsPinned) {
-    return 0
-  }
-
-  $grip = 10
-  $cursor = $Form.PointToClient([System.Windows.Forms.Cursor]::Position)
-  $left = $cursor.X -le $grip
-  $right = $cursor.X -ge ($Form.ClientSize.Width - $grip)
-  $top = $cursor.Y -le $grip
-  $bottom = $cursor.Y -ge ($Form.ClientSize.Height - $grip)
-
-  if ($left -and $top) {
-    return 13
-  }
-
-  if ($right -and $top) {
-    return 14
-  }
-
-  if ($left -and $bottom) {
-    return 16
-  }
-
-  if ($right -and $bottom) {
-    return 17
-  }
-
-  if ($left) {
-    return 10
-  }
-
-  if ($right) {
-    return 11
-  }
-
-  if ($top) {
-    return 12
-  }
-
-  if ($bottom) {
-    return 15
-  }
-
-  return 0
-}
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(250, $RefreshMs)
@@ -767,11 +658,15 @@ function Resize-OverlayToContent {
     [System.Windows.Forms.Label]$Detail
   )
 
-  if ($combinedMode) {
+  if ($combinedMode -and $script:DisplayLayout -ne "stacked") {
     Resize-UsageColumns -Form $Form -Main $Main -Detail $Detail
     return
   }
 
+  foreach ($column in $script:usageColumnControls) { $column.Main.Dispose(); $column.Detail.Dispose() }
+  $script:usageColumnControls = @()
+  $Main.Visible = $true
+  $Detail.Visible = $true
   $mainSize = Measure-MultilineTextSize -Text $Main.Text -Font $Main.Font
   $detailSize = Measure-MultilineTextSize -Text $Detail.Text -Font $Detail.Font
   $left = 7
@@ -779,7 +674,7 @@ function Resize-OverlayToContent {
   $gap = 1
   $right = 6
   $bottom = 7
-  $buttonArea = if ($script:IsPinned) { 26 } else { 78 }
+  $buttonArea = if ($script:IsPinned) { 26 } else { 66 }
   $mainVerticalPadding = 2
   $detailVerticalPadding = 5
 
@@ -852,8 +747,8 @@ function Resize-UsageColumns {
     $column.Detail.SetBounds($x, (5 + $mainHeight), $width, $detailHeight)
     $x += $width + 20
   }
-  # Reserve the full settings/pin/reset/close strip after the final column.
-  $buttonArea = if ($script:IsPinned) { 26 } else { 128 }
+  # Reserve the pin/settings/close strip after the final column.
+  $buttonArea = if ($script:IsPinned) { 26 } else { 66 }
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
   $Form.ClientSize = [System.Drawing.Size]::new(
     [int][Math]::Max($minimumWidth, $x - 20 + 6 + $buttonArea),
@@ -1178,6 +1073,7 @@ function Show-SharedDisplaySettings {
     if (-not (Test-Path -LiteralPath $displaySettingsFile)) { return $true }
 
     $savedSettings = Get-Content -LiteralPath $displaySettingsFile -Raw | ConvertFrom-Json
+    $script:DisplayLayout = if ($savedSettings.display_layout -eq "stacked") { "stacked" } else { "columns" }
     if ($savedSettings.claude_desktop_group) { $script:ClaudeDesktopGroup = Convert-GroupCode ([string]$savedSettings.claude_desktop_group) }
     if ($savedSettings.PSObject.Properties.Name -contains "claude_desktop_sources") { $script:ClaudeDesktopSources = @($savedSettings.claude_desktop_sources) }
     if ($savedSettings.claude_cli_group) { $script:ClaudeCliGroup = Convert-GroupCode ([string]$savedSettings.claude_cli_group) }
@@ -1494,6 +1390,15 @@ function Show-DisplaySettings {
   })
   $dialog.Controls.Add($openCodexAccount)
 
+  $layoutSelector = New-Object System.Windows.Forms.ComboBox
+  $layoutSelector.DropDownStyle = 'DropDownList'
+  $layoutSelector.Location = New-Object System.Drawing.Point(20, (490 + $desktopOffset))
+  $layoutSelector.Size = New-Object System.Drawing.Size(220, 24)
+  [void]$layoutSelector.Items.Add('Two rows / columns')
+  [void]$layoutSelector.Items.Add('Stacked rows')
+  $layoutSelector.SelectedIndex = if ($script:DisplayLayout -eq 'stacked') { 1 } else { 0 }
+  $dialog.Controls.Add($layoutSelector)
+
   $save = New-Object System.Windows.Forms.Button
   $save.Text = "Save"
   $save.DialogResult = [System.Windows.Forms.DialogResult]::OK
@@ -1520,6 +1425,7 @@ function Show-DisplaySettings {
   }
 
   if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    $script:DisplayLayout = if ($layoutSelector.SelectedIndex -eq 1) { "stacked" } else { "columns" }
     $script:ClaudeUserEnvironment = [string]$environmentSelector.SelectedItem
     for ($desktopIndex = 0; $desktopIndex -lt $claudeDesktopSelectors.Count -and $desktopIndex -lt $script:ClaudeDesktopSources.Count; $desktopIndex++) {
       $script:ClaudeDesktopSources[$desktopIndex].group = [string]$claudeDesktopSelectors[$desktopIndex].SelectedItem
@@ -1542,6 +1448,7 @@ function Show-DisplaySettings {
       codex_cli_group = $script:CodexCliGroup
       codex_ssh_group = $script:CodexSshGroup
       codex_ssh_sources = @($script:CodexSshSources)
+      display_layout = $script:DisplayLayout
       claude_user_environment = $script:ClaudeUserEnvironment
     } |
       ConvertTo-Json | Set-Content -LiteralPath $displaySettingsFile -Encoding UTF8

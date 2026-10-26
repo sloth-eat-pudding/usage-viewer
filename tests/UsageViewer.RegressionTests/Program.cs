@@ -215,12 +215,16 @@ static void Settings()
     Equal("3", legacy.ClaudeCustomSources[0].Group, "Legacy custom path migration");
     Equal("Hidden", legacy.ClaudeCliGroup, "Case-insensitive hidden");
     Equal("default", legacy.ClaudeUserEnvironment, "Legacy environment migration");
+    Equal("columns", legacy.DisplayLayout, "Legacy settings retain the current two-row layout");
     var source = new ConfiguredSource("SSH", "", "12", "user", "host", 2222, "C:\\key", "~/sessions", "C:\\profile");
-    var settings = legacy with { CodexSshSources = new[] { source }, ClaudeUserEnvironment = "Work" };
+    var settings = legacy with { CodexSshSources = new[] { source }, ClaudeUserEnvironment = "Work", DisplayLayout = "stacked" };
     store.Save(settings);
     var loaded = store.Load();
     Equal(source, loaded.CodexSshSources[0], "All source fields survive round trip");
     Equal("Work", loaded.ClaudeUserEnvironment, "Custom environment survives round trip");
+    Equal("stacked", loaded.DisplayLayout, "Display layout survives round trip");
+    store.Save(loaded with { DisplayLayout = "columns" });
+    Equal("columns", store.Load().DisplayLayout, "Layout can be changed back to columns");
     Equal("host", fixture.Read("remote-sources.json").GetProperty("sources")[0].GetProperty("host").GetString(), "Remote reader settings emitted");
     Equal(1, fixture.Read("claude-custom-source.json").GetProperty("sources").GetArrayLength(), "Custom reader settings emitted");
     File.WriteAllText(Path.Combine(fixture.Root, "display-settings.json"), "{broken");
