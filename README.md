@@ -89,6 +89,12 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 腳本版的啟動與重新啟動入口都會執行 `scripts\watch-claude-desktop-usage-bridge.ps1`，每 15 秒檢查本機 bridge，未啟動或停止回應時自動恢復。啟動紀錄與標準錯誤保存在 `%USERPROFILE%\.usage-viewer\claude-desktop-usage-bridge-watch.log` 與 `claude-desktop-usage-bridge.stderr.log`。
 
+## Codex Desktop 內建面板試作
+
+啟動腳本版 Usage Viewer 後，可在 Codex 的內建瀏覽面板開啟 `http://127.0.0.1:8765/codex-panel`，查看 Desktop 的 5h／7d 用量、重置時間、最近輸入快取命中率與來源 session 累計 tokens。每 5 秒讀取本機快照，超過 5 分鐘的資料會標示為較舊快照；資料缺失顯示未知，不會當成零。
+
+此版本是顯示於 Codex 旁的網頁面板，不會修改 Codex 原生輸入框或工具列。資料來自最近有用量紀錄的 Desktop session，可能是其他聊天；快取命中率為最近一次輸入的比例，並非快取有效時間。只提供必要的顯示欄位，不回傳 session 路徑或對話內容。此入口目前只由 Node.js bridge 提供，WPF exe 模式不提供。
+
 ## 遠端 Codex 同步（可選）
 
 複製 `config\remote.env.example` 為 `config\remote.env`，再填入你的 SSH 連線資訊：

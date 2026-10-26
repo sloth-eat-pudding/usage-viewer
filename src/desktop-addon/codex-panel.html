@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Codex · Usage Viewer</title>
+<style>
+:root{color-scheme:dark;font:14px 'Segoe UI','Microsoft JhengHei',sans-serif;background:#181818;color:#eee}*{box-sizing:border-box}body{margin:0;padding:28px 22px;max-width:820px;margin-inline:auto}header{display:flex;align-items:center;gap:12px;margin-bottom:30px}.logo{width:36px;height:36px;border:1px solid #484848;border-radius:11px;display:grid;place-items:center;font:20px monospace}h1{font-size:17px;font-weight:600;margin:0 0 4px}.sub,small{font-size:12px;color:#999}.status{margin-left:auto;font-size:12px;color:#a8d7b6}.status:before{content:'●';margin-right:6px;font-size:9px}.intro{font-size:27px;letter-spacing:-1px;margin:0 0 8px}.description{color:#aaa;margin:0 0 26px;line-height:1.7}.card{background:#212121;border:1px solid #363636;border-radius:16px;padding:22px;margin-bottom:14px}.topline{display:flex;justify-content:space-between;align-items:center}.label{color:#ccc}.value{font-size:40px;font-weight:600;letter-spacing:-1.5px;margin:14px 0}.value small{font-size:14px;margin-left:6px;font-weight:400;letter-spacing:0}.track{height:6px;background:#3a3a3a;border-radius:6px;overflow:hidden;margin-bottom:16px}.bar{height:100%;width:0;background:#b9d9c4;border-radius:6px;transition:width .4s}.reset{color:#aaa;font-size:12px}.metrics{display:grid;grid-template-columns:1fr 1fr;gap:14px}.metrics .card{padding:18px}.metric{font-size:23px;margin-top:12px}.footer{color:#999;font-size:12px;line-height:1.8;margin-top:20px}.model{border:1px solid #414141;border-radius:20px;padding:5px 10px;font-size:11px;color:#bbb;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}button{background:#282828;border:1px solid #484848;color:#ddd;padding:7px 12px;border-radius:8px;cursor:pointer;margin-top:12px}button:hover{background:#363636}#error{color:#edc18f;line-height:1.7}body.stale .status{color:#edc18f}@media(max-width:360px){body{padding:20px 14px}.metrics{gap:8px}.metrics .card{padding:14px}.model{max-width:130px}}
+</style>
+<header><div class="logo">&gt;_</div><div><h1>Usage Viewer</h1><div class="sub">Codex Desktop · 即時用量</div></div><div class="status" id="status">連線中</div></header>
+<h2 class="intro">用量，一眼掌握。</h2><p class="description">在聊天旁查看目前額度，繼續手上的工作。</p>
+<p id="error" hidden role="status"></p>
+<section class="card"><div class="topline"><span class="label">5 小時額度</span><span class="model" id="model">—</span></div><div class="value"><span id="five">—</span><small>已使用</small></div><div class="track"><div class="bar" id="five-bar"></div></div><div class="reset" id="five-reset">等待資料</div></section>
+<section class="card"><div class="label">7 天額度</div><div class="value"><span id="seven">—</span><small>已使用</small></div><div class="track"><div class="bar" id="seven-bar"></div></div><div class="reset" id="seven-reset">等待資料</div></section>
+<div class="metrics"><section class="card"><div class="label">最近一次輸入快取命中率</div><div class="metric" id="cache">—</div></section><section class="card"><div class="label">此來源 session 累計 tokens</div><div class="metric" id="tokens">—</div></section></div>
+<div class="footer"><div id="updated">等待本機 Usage Viewer 資料</div><div>每 5 秒讀取本機快照；來源為最近有用量紀錄的 Desktop session，可能是其他聊天。</div><div>這是 Codex 內建瀏覽面板中的試作，並未更動原生工具列。</div><button id="refresh" type="button">立即更新</button></div>
+<script src="/codex-panel.js"></script>
+</html>
