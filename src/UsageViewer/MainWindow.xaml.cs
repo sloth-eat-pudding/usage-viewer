@@ -108,6 +108,8 @@ public partial class MainWindow : Window
         }
         MainText.Text = rows.Count == 0 ? "Waiting for Claude / Codex usage..." : string.Join("\n", rows.Select(row => row.Main));
         DetailText.Text = string.Join("\n", rows.Select(row => row.Detail));
+        ReserveDigitWidth(MainText, rows.Select(row => row.Main));
+        ReserveDigitWidth(DetailText, rows.Select(row => row.Detail));
         DetailText.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -124,10 +126,33 @@ public partial class MainWindow : Window
         for (var index = 0; index < rows.Count; index++)
         {
             var column = (StackPanel)ColumnsPanel.Children[index];
-            ((TextBlock)column.Children[0]).Text = rows[index].Main;
-            ((TextBlock)column.Children[1]).Text = rows[index].Detail;
+            var main = (TextBlock)column.Children[0];
+            var detail = (TextBlock)column.Children[1];
+            main.Text = rows[index].Main;
+            detail.Text = rows[index].Detail;
+            // Size both lines of a column together so it keeps one width.
+            var width = Math.Max(ReservedWidth(main, rows[index].Main), ReservedWidth(detail, rows[index].Detail));
+            main.MinWidth = width;
+            detail.MinWidth = width;
         }
     }
+
+    // Like the overlay, reserve at least three digit slots for every number
+    // (100%, countdowns) so refreshes never move later columns or the edge.
+    private void ReserveDigitWidth(TextBlock block, IEnumerable<string> lines) =>
+        block.MinWidth = lines.Select(line => ReservedWidth(block, line)).DefaultIfEmpty(0).Max();
+
+    private double ReservedWidth(TextBlock block, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var placeholder = Regex.Replace(text, "[0-9]+", match => new string('8', Math.Max(3, match.Length)));
+        return Math.Max(MeasureText(block, placeholder), MeasureText(block, text));
+    }
+
+    private double MeasureText(TextBlock block, string text) =>
+        new System.Windows.Media.FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            new System.Windows.Media.Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch),
+            block.FontSize, block.Foreground, System.Windows.Media.VisualTreeHelper.GetDpi(this).PixelsPerDip).WidthIncludingTrailingWhitespace;
 
     private List<UsageSource> ClaudeSources() => ClaudeDesktopUsageSources()
         .Concat(new[] { new UsageSource("C", _displaySettings.ClaudeCliGroup, Read("claude-statusline-latest.json")) })
