@@ -97,17 +97,9 @@ window.usageBridgeTimer = setInterval(() => window.forwardClaudeDesktopUsage(), 
 
 雙擊 `Start-Codex-Session-Meter.cmd`，即可啟動附有全寬與用量標籤的官方 Codex 測試視窗。標籤顯示 5h／7d 已使用百分比、來源快取命中率，以及基於 API 預設 30 分鐘假設的粗估倒數；不是伺服器實際到期時間。每五秒讀取本機快照，按 × 可移除並還原欄寬；不修改安裝檔。此入口沿用目前帳號，尚未實測多帳號隔離。詳細環境、操作限制及還原方式見 [原介面用量標籤實驗](docs/codex-native-meter.md)。
 
-## 遠端 Codex 同步（可選）
+## 遠端 Codex 同步已停用
 
-複製 `config\remote.env.example` 為 `config\remote.env`，再填入你的 SSH 連線資訊：
-
-```powershell
-Copy-Item config\remote.env.example config\remote.env
-```
-
-支援 `REMOTE_USER`、`REMOTE_HOST`、`POLL_SECONDS`、`SSH_KEY_PATH`、`SSH_PORT` 與 `REMOTE_SESSIONS_PATH`。同步器只透過 SCP 複製遠端 `.codex/sessions` 到本機快取；遠端主機不需要安裝此專案。
-
-`config\remote.env` 是個人機器設定，已加入 `.gitignore`。WPF publish 時若此檔存在，會一併帶到 publish 輸出，供 exe 的背景同步器讀取。
+Usage Viewer 不再透過 SSH/SCP 複製遠端 .codex/sessions，啟動與重啟也不會啟動同步器。舊的同步腳本僅保留為相容入口，執行時直接結束。既有遠端快取與 SSH 設定保留，但 SSH 用量不再自動更新；畫面上可能仍顯示舊快取資料。
 
 ## 開發
 

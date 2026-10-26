@@ -48,4 +48,3 @@ Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$PSScriptRoot\start-codex
 Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$PSScriptRoot\start-claude-desktop-reader.vbs`"" -WindowStyle Hidden
 Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\watch-claude-desktop-usage-bridge.ps1" -WindowStyle Hidden
 Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\claude-desktop-usage-injector.ps1" -WindowStyle Hidden
-Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',"$PSScriptRoot\sync-codex-remote.ps1" -WindowStyle Hidden
