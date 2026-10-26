@@ -4,7 +4,7 @@
         Title="Usage Viewer" MinWidth="340" MaxWidth="900" SizeToContent="WidthAndHeight"
         WindowStyle="None" ResizeMode="NoResize"
         AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="True"
+        Topmost="True" ShowInTaskbar="True" Typography.NumeralAlignment="Tabular"
         PreviewMouseLeftButtonDown="OnPreviewMouseLeftButtonDown">
   <Border x:Name="OverlayBorder" Background="#F0181818" BorderBrush="#4AFFFFFF"
           BorderThickness="1" CornerRadius="10" Padding="8,6">
