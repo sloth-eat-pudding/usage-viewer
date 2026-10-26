@@ -2,7 +2,10 @@
 function Read-CodexAccountRegistry([string]$Path, [string]$ProfilesRoot) {
   $saved = $null
   try { $saved = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json } catch { }
-  $profiles = @([pscustomobject]@{ id = 'default'; name = 'Codex (self)'; profile_root = '' })
+  $defaultName = 'Codex'
+  $original = @($saved.profiles | Where-Object { $_.id -eq 'default' -and $_.name })
+  if ($original.Count) { $defaultName = [string]$original[0].name }
+  $profiles = @([pscustomobject]@{ id = 'default'; name = $defaultName; profile_root = '' })
   foreach ($item in @($saved.profiles)) {
     if ($item.id -ne 'default' -and $item.id -match '^[a-zA-Z0-9_-]+$' -and $item.name -and $item.profile_root -and [IO.Path]::IsPathRooted([string]$item.profile_root)) {
       $profiles += [pscustomobject]@{ id = [string]$item.id; name = [string]$item.name; profile_root = [IO.Path]::GetFullPath([string]$item.profile_root) }
@@ -28,10 +31,14 @@ function Save-CodexAccountRegistry([string]$Path, $Registry) {
   } finally { if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force } }
 }
 function Register-CodexAccount($Registry, [string]$Name, [string]$Root, [string]$Id = '') {
-  if ($Id -eq 'default') { throw 'The original account cannot be changed. Add a new account instead.' }
   $Name = $Name.Trim()
-  if (!$Name -or !$Root -or ![IO.Path]::IsPathRooted($Root) -or $Root.Contains('"')) { throw 'A name and an absolute profile folder are required.' }
-  $Root = [IO.Path]::GetFullPath($Root)
+  if (!$Name) { throw 'An account name is required.' }
+  if ($Id -eq 'default') {
+    if ($Root) { throw 'The original account folder cannot be changed. Add a new account instead.' }
+  } else {
+    if (!$Root -or ![IO.Path]::IsPathRooted($Root) -or $Root.Contains('"')) { throw 'An absolute profile folder is required.' }
+    $Root = [IO.Path]::GetFullPath($Root)
+  }
   if ($Id -and @($Registry.profiles | Where-Object { $_.id -eq $Id }).Count -ne 1) { throw 'Selected account no longer exists.' }
   if (@($Registry.profiles | Where-Object { $_.id -ne $Id -and ($_.name -ieq $Name -or $_.profile_root.TrimEnd('\') -ieq $Root.TrimEnd('\')) }).Count) { throw 'An account with this name or folder is already registered.' }
   if (!$Id) { $Id = [Guid]::NewGuid().ToString('N') }

@@ -108,8 +108,9 @@ $accounts.Add_SelectedIndexChanged({
     $name.Text = $accounts.SelectedItem.name
     $folder.Text = $accounts.SelectedItem.profile_root
     $editable = $script:editingId -ne 'default'
-    $name.Enabled = $folder.Enabled = $browse.Enabled = $register.Enabled = $editable
-    if (!$editable) { $status.Text = '目前是原本的 Codex 帳號。要註冊另一個帳號，請按「新增帳號」。' }
+    $folder.Enabled = $browse.Enabled = $editable
+    $name.Enabled = $register.Enabled = $true
+    if (!$editable) { $status.Text = '這是原本帳號，名稱可自行修改並儲存。要註冊另一個帳號，請按「新增帳號」。' }
   }
 })
 $add.Add_Click({
@@ -175,7 +176,7 @@ $timer.Add_Tick({
     $script:launchProcess = $null
     $open.Enabled = $browse.Enabled = $folder.Enabled = $close.Enabled = $true
     $accounts.Enabled = $name.Enabled = $register.Enabled = $add.Enabled = $true
-    if ($accounts.SelectedItem.id -eq 'default') { $name.Enabled = $folder.Enabled = $browse.Enabled = $register.Enabled = $false }
+    if ($accounts.SelectedItem.id -eq 'default') { $folder.Enabled = $browse.Enabled = $false }
   }
 })
 $dialog.Add_FormClosing({ param($sender, $eventArgs) if ($script:launchProcess -and !$script:launchProcess.HasExited) { $eventArgs.Cancel = $true } })

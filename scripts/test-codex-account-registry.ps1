@@ -7,6 +7,11 @@ try {
   $profilesRoot = Join-Path $temporaryRoot 'profiles'
   $registry = Read-CodexAccountRegistry $file $profilesRoot
   if ($registry.profiles.Count -ne 1 -or $registry.selected_id -ne 'default' -or $registry.profiles[0].profile_root) { throw 'Initial state must contain only the original account, without a new profile folder.' }
+  if ($registry.profiles[0].name -ne 'Codex') { throw 'The initial account name is not neutral.' }
+  [void](Register-CodexAccount $registry 'My own label' '' 'default')
+  Save-CodexAccountRegistry $file $registry
+  $registry = Read-CodexAccountRegistry $file $profilesRoot
+  if ($registry.profiles[0].name -ne 'My own label' -or $registry.profiles[0].profile_root) { throw 'Custom original-account name was not retained independently of its login source.' }
   $firstRoot = Join-Path $temporaryRoot 'first account'
   $secondRoot = Join-Path $temporaryRoot 'second account'
   $first = Register-CodexAccount $registry 'Work' $firstRoot
