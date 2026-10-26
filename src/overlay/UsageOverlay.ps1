@@ -393,6 +393,7 @@ $panel.Controls.Add($costToggle)
 
 $script:showCost = $false
 $script:heightBeforeCostExpand = $null
+$script:usageColumnControls = @()
 
 $layoutOverlay = {
   $width = [Math]::Max(80, $panel.ClientSize.Width - 135)
@@ -766,6 +767,11 @@ function Resize-OverlayToContent {
     [System.Windows.Forms.Label]$Detail
   )
 
+  if ($combinedMode) {
+    Resize-UsageColumns -Form $Form -Main $Main -Detail $Detail
+    return
+  }
+
   $mainSize = Measure-MultilineTextSize -Text $Main.Text -Font $Main.Font
   $detailSize = Measure-MultilineTextSize -Text $Detail.Text -Font $Detail.Font
   $left = 7
@@ -793,6 +799,65 @@ function Resize-OverlayToContent {
   $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $mainHeight)
   $Detail.Location = [System.Drawing.Point]::new($left, $top + $mainHeight + $gap)
   $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $detailHeight)
+}
+
+function Resize-UsageColumns {
+  param(
+    [System.Windows.Forms.Form]$Form,
+    [System.Windows.Forms.Label]$Main,
+    [System.Windows.Forms.Label]$Detail
+  )
+
+  # Each group owns one column: usage above its reset/age details.
+  # Keep the original labels as the text model for diagnostics and waiting states.
+  $mainLines = @($Main.Text -split "`r?`n")
+  $detailLines = @($Detail.Text -split "`r?`n")
+  while ($script:usageColumnControls.Count -gt $mainLines.Count) {
+    $last = $script:usageColumnControls[-1]
+    $last.Main.Dispose()
+    $last.Detail.Dispose()
+    $script:usageColumnControls = @($script:usageColumnControls | Select-Object -SkipLast 1)
+  }
+  while ($script:usageColumnControls.Count -lt $mainLines.Count) {
+    $column = @{}
+    foreach ($name in @('Main', 'Detail')) {
+      $template = if ($name -eq 'Main') { $Main } else { $Detail }
+      $label = New-Object System.Windows.Forms.Label
+      $label.Font = $template.Font
+      $label.ForeColor = $template.ForeColor
+      $label.BackColor = [System.Drawing.Color]::Transparent
+      $label.AutoSize = $false
+      $label.Add_MouseDown($mouseDown)
+      $label.Add_MouseMove($mouseMove)
+      $label.Add_MouseUp($mouseUp)
+      $Main.Parent.Controls.Add($label)
+      $column[$name] = $label
+    }
+    $script:usageColumnControls += $column
+  }
+
+  $Main.Visible = $false
+  $Detail.Visible = $false
+  $mainHeight = [System.Windows.Forms.TextRenderer]::MeasureText('Ag', $Main.Font).Height + 2
+  $detailHeight = [System.Windows.Forms.TextRenderer]::MeasureText('Ag', $Detail.Font).Height + 5
+  $x = 7
+  for ($index = 0; $index -lt $mainLines.Count; $index++) {
+    $column = $script:usageColumnControls[$index]
+    $column.Main.Text = $mainLines[$index]
+    $column.Detail.Text = if ($index -lt $detailLines.Count) { $detailLines[$index] } else { '' }
+    $width = [int][Math]::Max(
+      (Measure-TextWidth -Text $column.Main.Text -Font $Main.Font),
+      (Measure-TextWidth -Text $column.Detail.Text -Font $Detail.Font))
+    $column.Main.SetBounds($x, 4, $width, $mainHeight)
+    $column.Detail.SetBounds($x, (5 + $mainHeight), $width, $detailHeight)
+    $x += $width + 20
+  }
+  # Reserve the full settings/pin/reset/close strip after the final column.
+  $buttonArea = if ($script:IsPinned) { 26 } else { 128 }
+  $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
+  $Form.ClientSize = [System.Drawing.Size]::new(
+    [int][Math]::Max($minimumWidth, $x - 20 + 6 + $buttonArea),
+    [int][Math]::Max($Form.MinimumSize.Height, 4 + $mainHeight + 1 + $detailHeight + 7))
 }
 
 function Measure-MultilineTextSize {
