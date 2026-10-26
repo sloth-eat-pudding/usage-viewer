@@ -22,13 +22,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax failed: $($file.Name)" }
   }
 
-  & node --test tests/claude-usage-contract.test.js tests/claude-profile-discovery.test.js tests/claude-subagent-usage.test.js tests/codex-panel.test.js
+  & node --test tests/claude-usage-contract.test.js tests/claude-profile-discovery.test.js tests/claude-subagent-usage.test.js
   if ($LASTEXITCODE -ne 0) { throw 'JavaScript contract tests failed' }
 
   & node --check src/desktop-addon/claude-session-meter.js
   if ($LASTEXITCODE -ne 0) { throw 'Desktop session meter syntax failed' }
-  & node --check src/desktop-addon/codex-panel.js
-  if ($LASTEXITCODE -ne 0) { throw 'Codex panel syntax failed' }
   & node --test tests/claude-session-meter.test.js
   if ($LASTEXITCODE -ne 0) { throw 'Desktop session meter tests failed' }
 

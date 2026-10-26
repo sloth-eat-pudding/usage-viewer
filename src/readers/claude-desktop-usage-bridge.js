@@ -9,7 +9,6 @@ const os = require('os')
 const path = require('path')
 const { normalizeUsage } = require('./claude-usage-contract')
 const { readSubagentUsage } = require('./claude-subagent-usage')
-const { handlePanelRequest } = require('./codex-panel')
 
 const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
@@ -25,12 +24,6 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 http.createServer((request, response) => {
   const origin = request.headers.origin || ''
   const requestUrl = new URL(request.url || '/', 'http://127.0.0.1')
-
-  if (handlePanelRequest(request, response, USAGE_VIEWER_HOME, PORT)) return
-  if (request.method === 'GET' && requestUrl.pathname === '/codex-panel.js') {
-    response.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' })
-    return response.end(fs.readFileSync(path.join(__dirname, '../desktop-addon/codex-panel.js')))
-  }
 
   if (request.method === 'OPTIONS') {
     if (!ALLOWED_ORIGINS.has(origin)) return respond(response, 403)

@@ -78,10 +78,8 @@ async function testHttpBridge() {
     message: { id: 'msg-1', model: 'claude-opus-5-5', content: 'PRIVATE CONTENT', usage: { input_tokens: 1, output_tokens: 2 } } }))
   const child = spawn(process.execPath, [path.join(__dirname, '../src/readers/claude-desktop-usage-bridge.js')], {
     env: { ...process.env, CLAUDE_HOME: claudeHome, USAGE_VIEWER_HOME: path.dirname(process.argv[2]), CLAUDE_DESKTOP_USAGE_BRIDGE_PORT: String(port) },
-    stdio: ['ignore', 'ignore', 'pipe']
+    stdio: 'ignore'
   })
-  let startupError = ''
-  child.stderr.on('data', chunk => { startupError += chunk })
   function request(endpoint, body, origin = 'https://claude.ai', json = false) {
     return new Promise((resolve, reject) => {
       const req = http.request({ hostname: '127.0.0.1', port, path: endpoint, method: body ? 'POST' : 'GET',
@@ -100,7 +98,7 @@ async function testHttpBridge() {
       if (ready) break
       await new Promise(resolve => setTimeout(resolve, 100))
     }
-    assert.equal(ready, true, `Bridge must start: ${startupError}`)
+    assert.equal(ready, true, 'Bridge must start')
     const accounting = await request('/claude-subagent-usage?session=' + session, null, 'https://claude.ai', true)
     assert.equal(accounting.status, 200)
     assert.equal(accounting.body.complete, true)
