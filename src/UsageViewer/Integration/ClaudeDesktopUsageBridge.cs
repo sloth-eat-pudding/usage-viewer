@@ -11,10 +11,27 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
 {
     private readonly string _home;
     private readonly CancellationTokenSource _bridgeCancellation = new();
+    private readonly object _listenerLock = new();
     private HttpListener? _listener;
+    private Timer? _retryTimer;
 
     internal ClaudeDesktopUsageBridge(string home) => _home = home;
-    internal void Start() => _listener = StartClaudeDesktopUsageBridge();
+    internal void Start()
+    {
+        TryStart();
+        // The script mode's watchdog restarts its bridge every 15 seconds; do
+        // the same when the port was busy, e.g. while an old bridge exits.
+        _retryTimer = new Timer(_ => TryStart(), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+    }
+
+    private void TryStart()
+    {
+        lock (_listenerLock)
+        {
+            if (_listener is not null || _bridgeCancellation.IsCancellationRequested) return;
+            _listener = StartClaudeDesktopUsageBridge();
+        }
+    }
 
     // This is the native equivalent of claude-desktop-usage-bridge.js.  Keeping
     // it in the EXE keeps the portable release free of Node.js.
@@ -148,11 +165,15 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
 
     public void Dispose()
     {
-        _bridgeCancellation.Cancel();
-        if (_listener is not null)
+        _retryTimer?.Dispose();
+        lock (_listenerLock)
         {
-            try { _listener.Stop(); } catch { }
-            _listener.Close();
+            _bridgeCancellation.Cancel();
+            if (_listener is not null)
+            {
+                try { _listener.Stop(); } catch { }
+                _listener.Close();
+            }
         }
         _bridgeCancellation.Dispose();
     }

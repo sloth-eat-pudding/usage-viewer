@@ -14,17 +14,20 @@ internal sealed record ConfiguredSource(
     [property: JsonPropertyName("key_path")] string KeyPath = "",
     [property: JsonPropertyName("sessions_path")] string SessionsPath = "~/.codex/sessions",
     [property: JsonPropertyName("profile_path")] string ProfilePath = "");
-internal sealed record DisplaySettings(IReadOnlyList<ConfiguredSource> ClaudeDesktopSources, string ClaudeCliGroup, IReadOnlyList<ConfiguredSource> ClaudeCustomSources, string CodexDesktopGroup, string CodexCliGroup, IReadOnlyList<ConfiguredSource> CodexSshSources, string ClaudeUserEnvironment, string DisplayLayout = "columns")
+internal sealed record DisplaySettings(IReadOnlyList<ConfiguredSource> ClaudeDesktopSources, string ClaudeCliGroup, IReadOnlyList<ConfiguredSource> ClaudeCustomSources, string CodexDesktopGroup, string CodexCliGroup, IReadOnlyList<ConfiguredSource> CodexSshSources, string ClaudeUserEnvironment, string DisplayLayout = "columns",
+    // Groups for the fallback sources shown when no profile or SSH source is configured.
+    string FallbackClaudeDesktopGroup = "1", string FallbackCodexSshGroup = "2")
 {
-    public string ClaudeDesktopGroup => ClaudeDesktopSources.FirstOrDefault()?.Group ?? "1";
+    public string ClaudeDesktopGroup => ClaudeDesktopSources.FirstOrDefault()?.Group ?? FallbackClaudeDesktopGroup;
     public string ClaudeCustomPath => ClaudeCustomSources.FirstOrDefault()?.Path ?? "";
     public string ClaudeCustomGroup => ClaudeCustomSources.FirstOrDefault()?.Group ?? "1";
-    public string CodexSshGroup => CodexSshSources.FirstOrDefault()?.Group ?? "2";
+    public string CodexSshGroup => CodexSshSources.FirstOrDefault()?.Group ?? FallbackCodexSshGroup;
     public static DisplaySettings Default { get; } = new(Array.Empty<ConfiguredSource>(), "1", Array.Empty<ConfiguredSource>(), "1", "1", Array.Empty<ConfiguredSource>(), "default");
     public static DisplaySettings FromJson(JsonElement root) => new(
         Sources(root, "claude_desktop_sources", null, "claude_desktop_group", "Desktop"), Group(root, "claude_cli_group", "1"), Sources(root, "claude_custom_sources", "claude_custom_path", "claude_custom_group", "Custom"),
-        Group(root, "codex_desktop_group", "1"), Group(root, "codex_cli_group", "1"), Sources(root, "codex_ssh_sources", null, "codex_ssh_group", "SSH"), Environment(root), String(root, "display_layout") == "stacked" ? "stacked" : "columns");
-    public object ToStorage() => new { claude_desktop_group = ClaudeDesktopGroup, claude_desktop_sources = ClaudeDesktopSources, claude_cli_group = ClaudeCliGroup, claude_custom_sources = ClaudeCustomSources, codex_desktop_group = CodexDesktopGroup, codex_cli_group = CodexCliGroup, codex_ssh_sources = CodexSshSources, claude_user_environment = ClaudeUserEnvironment, display_layout = DisplayLayout };
+        Group(root, "codex_desktop_group", "1"), Group(root, "codex_cli_group", "1"), Sources(root, "codex_ssh_sources", null, "codex_ssh_group", "SSH"), Environment(root), String(root, "display_layout") == "stacked" ? "stacked" : "columns",
+        Group(root, "claude_desktop_group", "1"), Group(root, "codex_ssh_group", "2"));
+    public object ToStorage() => new { claude_desktop_group = ClaudeDesktopGroup, claude_desktop_sources = ClaudeDesktopSources, claude_cli_group = ClaudeCliGroup, claude_custom_sources = ClaudeCustomSources, codex_desktop_group = CodexDesktopGroup, codex_cli_group = CodexCliGroup, codex_ssh_group = CodexSshGroup, codex_ssh_sources = CodexSshSources, claude_user_environment = ClaudeUserEnvironment, display_layout = DisplayLayout };
     private static string String(JsonElement root, string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
     private static string Group(JsonElement root, string name, string fallback) { var value = String(root, name); return string.IsNullOrWhiteSpace(value) ? fallback : NormalizeGroup(value); }
     private static IReadOnlyList<ConfiguredSource> Sources(JsonElement root, string arrayName, string? legacyPathName, string legacyGroupName, string defaultName)

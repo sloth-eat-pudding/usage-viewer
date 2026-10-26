@@ -9,6 +9,7 @@ var tests = new (string Name, Action Run)[]
     ("Window heartbeat validation and metadata minimization", MeterHeartbeat),
     ("Claude account isolation, zero usage, stale and malformed snapshots", ClaudeSnapshots),
     ("Claude desktop, custom and statusline source selection", ClaudeSources),
+    ("Claude mapped profile without a history file", ClaudeMappedProfile),
     ("Codex event order, source modes and rate-limit windows", CodexSources),
     ("Codex empty and invalid sessions", EmptyCodex),
     ("Codex desktop bridge pairing and cache expiry", CodexBridge),
@@ -231,6 +232,25 @@ static void RemoteSnapshots()
     Equal(false, fixture.Store.IsNotOlder(snapshot, now.AddMinutes(-1)), "Older observation rejected");
     Equal(true, fixture.Store.IsNotOlder(snapshot, now), "Equal observation accepted");
     Equal(true, fixture.Store.IsNotOlder(snapshot, now.AddMinutes(1)), "Newer observation accepted");
+
+    using var envOnly = new Workspace();
+    WriteSession(Path.Combine(envOnly.Root, "remote-codex", "0", "sessions", "remote.jsonl"), "cli", now, 33);
+    using (var envReader = new CodexUsageReader(envOnly.Store, Path.Combine(envOnly.Root, "missing-local"))) envReader.Refresh();
+    Equal(33d, envOnly.Percent(snapshot), "remote.env-only sync slot is read without remote-sources.json");
+}
+
+static void ClaudeMappedProfile()
+{
+    using var fixture = new Workspace();
+    var now = DateTimeOffset.UtcNow;
+    var missing = Path.Combine(fixture.Root, "deleted-profile", "plan-usage-history.json");
+    fixture.Store.Write("claude-profile-organizations.json", new { sources = new[] { new { path = missing, organization_id = Id(7) } } });
+    WriteApi(fixture.Store, Id(7), 12, 34, now);
+    Equal(Id(7), ClaudeDesktopProfiles.MappedOrganization(missing.ToUpperInvariant(), fixture.Root), "Mapping lookup ignores case");
+    Equal(null, ClaudeDesktopProfiles.MappedOrganization(Path.Combine(fixture.Root, "other.json"), fixture.Root), "Unmapped paths are never guessed");
+    using var reader = new ClaudeUsageReader(fixture.Store, new[] { missing });
+    reader.Refresh();
+    Equal(12d, fixture.Percent("claude-desktop-0-latest.json"), "Mapped profile pairs with its API snapshot");
 }
 
 static void Settings()
@@ -248,6 +268,14 @@ static void Settings()
     Equal("Hidden", legacy.ClaudeCliGroup, "Case-insensitive hidden");
     Equal("default", legacy.ClaudeUserEnvironment, "Legacy environment migration");
     Equal("columns", legacy.DisplayLayout, "Legacy settings retain the current two-row layout");
+    Equal("2", legacy.CodexSshGroup, "Default SSH fallback group");
+    fixture.Store.Write("display-settings.json", new { claude_desktop_group = "3", codex_ssh_group = "4" });
+    var fallback = store.Load();
+    Equal("3", fallback.ClaudeDesktopGroup, "Desktop group without detected profiles");
+    Equal("4", fallback.CodexSshGroup, "SSH group without configured sources");
+    store.Save(fallback);
+    Equal("4", store.Load().CodexSshGroup, "Fallback groups survive round trip");
+    Equal("4", fixture.Read("display-settings.json").GetProperty("codex_ssh_group").GetString(), "Overlay reads the same SSH group");
     var source = new ConfiguredSource("SSH", "", "12", "user", "host", 2222, "C:\\key", "~/sessions", "C:\\profile");
     var settings = legacy with { CodexSshSources = new[] { source }, ClaudeUserEnvironment = "Work", DisplayLayout = "stacked" };
     store.Save(settings);

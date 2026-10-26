@@ -28,7 +28,7 @@ internal sealed class ClaudeUsageReader : IDisposable
     {
         _store = store;
         _home = store.Home;
-        _claudePlanUsageHistories = histories ?? FindClaudePlanUsageHistories();
+        _claudePlanUsageHistories = histories ?? ClaudeDesktopProfiles.FindWithMappings(_home).Select(profile => profile.Path).ToList();
         _claudePlanUsageHistory = FindSelectedClaudePlanUsageHistory(_claudePlanUsageHistories);
     }
 
@@ -110,11 +110,13 @@ internal sealed class ClaudeUsageReader : IDisposable
         for (var index = 0; index < _claudePlanUsageHistories.Count; index++)
         {
             var sourcePath = _claudePlanUsageHistories[index];
-            var sourceWriteTime = TryGetWriteTimeUtc(sourcePath);
             var plan = ReadClaudePlanUsage(sourcePath);
-            if (plan is null || sourceWriteTime is null) continue;
+            if (plan is null) continue;
 
             var desktopApi = ClaudeDesktopApiUsage.Read(_home, plan.Organization);
+            // A mapped profile has no history file; its API snapshot dates it.
+            var sourceWriteTime = TryGetWriteTimeUtc(sourcePath) ?? desktopApi?.ObservedAt;
+            if (sourceWriteTime is null) continue;
             var observedAt = sourceWriteTime.Value;
             if (desktopApi is not null && desktopApi.ObservedAt > observedAt) observedAt = desktopApi.ObservedAt;
             _store.Write($"claude-desktop-{index}-latest.json", new {
@@ -302,9 +304,16 @@ internal sealed class ClaudeUsageReader : IDisposable
 
     private ClaudePlanUsage? ReadClaudePlanUsage() => ReadClaudePlanUsage(_claudePlanUsageHistory);
 
-    private static ClaudePlanUsage? ReadClaudePlanUsage(string? sourcePath)
+    private ClaudePlanUsage? ReadClaudePlanUsage(string? sourcePath)
     {
-        if (sourcePath is null || !File.Exists(sourcePath)) return null;
+        if (sourcePath is null) return null;
+        sourcePath = ClaudeDesktopProfiles.Resolve(sourcePath);
+        if (!File.Exists(sourcePath))
+        {
+            // Only an explicit profile mapping may stand in for a missing history file.
+            var organization = ClaudeDesktopProfiles.MappedOrganization(sourcePath, _home);
+            return organization is null ? null : new ClaudePlanUsage(DateTimeOffset.FromUnixTimeMilliseconds(0), null, null, organization, null, null);
+        }
 
         try
         {
@@ -420,9 +429,6 @@ internal sealed class ClaudeUsageReader : IDisposable
         catch { return null; }
     }
 
-    private static IReadOnlyList<string> FindClaudePlanUsageHistories() =>
-        ClaudeDesktopProfiles.Find().Select(profile => profile.Path).ToList();
-
     private string? FindSelectedClaudePlanUsageHistory(IReadOnlyList<string> defaults)
     {
         var settingsPath = Path.Combine(_home, "display-settings.json");
@@ -452,8 +458,8 @@ internal sealed class ClaudeUsageReader : IDisposable
                         {
                             var name = source.TryGetProperty("name", out var n) ? n.GetString() : null;
                             var path = source.TryGetProperty("path", out var p) ? p.GetString() : null;
-                            if (string.Equals(name, environment, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                                return path;
+                            if (string.Equals(name, environment, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(path) && File.Exists(ClaudeDesktopProfiles.Resolve(path!)))
+                                return ClaudeDesktopProfiles.Resolve(path!);
                         }
                     }
                 }

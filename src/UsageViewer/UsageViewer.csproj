@@ -23,6 +23,7 @@
     <Resource Include="usage-viewer.ico" />
     <EmbeddedResource Include="..\..\scripts\claude-desktop-profiles.ps1" LogicalName="UsageViewer.ClaudeDesktopProfiles.ps1" />
     <EmbeddedResource Include="..\..\scripts\claude-desktop-usage-injector.ps1" LogicalName="UsageViewer.ClaudeDesktopUsageInjector.ps1" />
+    <EmbeddedResource Include="..\..\scripts\configure-claude-desktop-auto-bridge.ps1" LogicalName="UsageViewer.ConfigureClaudeDesktopAutoBridge.ps1" />
     <EmbeddedResource Include="..\desktop-addon\claude-session-meter.js" LogicalName="UsageViewer.ClaudeSessionMeter.js" />
     <EmbeddedResource Include="..\..\scripts\create-codex-account-profile.ps1" LogicalName="UsageViewer.CreateCodexAccountProfile.ps1" />
     <EmbeddedResource Include="..\..\scripts\codex-account-registry.ps1" LogicalName="UsageViewer.CodexAccountRegistry.ps1" />

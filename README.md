@@ -26,8 +26,11 @@ Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量�
 exe 會在背景讀取本機 Claude/Codex session，並把資料寫入 `%USERPROFILE%\.usage-viewer`。右上角按鈕功能如下：
 
 - `P`：釘選浮窗並讓其餘區域點擊穿透；按 `U` 解除。
-- `Settings`：選擇要顯示的來源、群組與自訂 Claude history 檔案。
+- `Settings`：選擇版面（兩列欄位或逐行堆疊）、來源群組、自訂 Claude history、SSH 來源、Codex 帳號視窗與 Claude Desktop bridge 設定。
 - `×`：結束 viewer 與它啟動的背景 reader。
+- `Ctrl+Alt+P`：切換釘選。
+
+exe 與腳本版共用相同的讀取來源與顯示規則：沒有偵測到 Claude Desktop profile 時顯示 `claude-desktop-latest.json`；沒有設定 SSH 來源時，顯示 `config\remote.env` 同步的遠端 Codex。exe 同時只會執行一個；本機 bridge 埠被占用時，每 15 秒重試一次。
 
 ## 來源與顯示設定
 
@@ -61,9 +64,9 @@ Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`�
 
 Usage Viewer 的 CMD overlay 與 EXE 都會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
 
-在 Claude Desktop 啟用 Developer Mode 後，先執行一次 `scripts\configure-claude-desktop-auto-bridge.ps1`。它會設定 Claude 官方支援的 `CLAUDE_DEV_TOOLS=undocked` 使用者環境變數，讓下一次 Claude 啟動時自動開啟 DevTools。Usage Viewer 會從本機 `plan-usage-history.json` 找出 organization ID，等待鍵鼠閒置後以 Unicode 鍵盤輸入下列等效同步程式，再關閉 DevTools 並恢復原本的前景視窗。Claude 之後每次重啟都會自動再次注入；目前已在執行的 Claude 不會被強制關閉。
+在 Claude Desktop 啟用 Developer Mode 後，先執行一次 `scripts\configure-claude-desktop-auto-bridge.ps1`（exe 使用者可改按 Settings →「Claude Desktop usage bridge」→「Enable automatic bridge」）。它會設定 Claude 官方支援的 `CLAUDE_DEV_TOOLS=undocked` 使用者環境變數，讓下一次 Claude 啟動時自動開啟 DevTools。Usage Viewer 會從本機 `plan-usage-history.json` 找出 organization ID，等待鍵鼠閒置後以 Unicode 鍵盤輸入下列等效同步程式，再關閉 DevTools 並恢復原本的前景視窗。Claude 之後每次重啟都會自動再次注入；目前已在執行的 Claude 不會被強制關閉。
 
-正式版 Claude 會拒絕一般的 remote-debugging/CDP 參數，因此這個流程使用 Claude 自己的 Developer Mode；不會修改 Claude 安裝檔、讀取程序記憶體、Cookie 或 Authorization header。執行 `scripts\configure-claude-desktop-auto-bridge.ps1 -Disable` 可還原由本專案建立的環境設定；`CLAUDE_DESKTOP_AUTO_BRIDGE=0` 可只停用 injector。手動診斷時仍可於 DevTools Console 執行：
+正式版 Claude 會拒絕一般的 remote-debugging/CDP 參數，因此這個流程使用 Claude 自己的 Developer Mode；不會修改 Claude 安裝檔、讀取程序記憶體、Cookie 或 Authorization header。執行 `scripts\configure-claude-desktop-auto-bridge.ps1 -Disable` 可還原由本專案建立的環境設定；`CLAUDE_DESKTOP_AUTO_BRIDGE=0` 可只停用 injector。若某個 profile 的 `plan-usage-history.json` 已不存在，可在 `config\claude-profile-organizations.json`（exe 也會讀取 `%USERPROFILE%\.usage-viewer\claude-profile-organizations.json` 或 exe 旁的 `config` 資料夾）明確對應路徑與 organization ID，讓它繼續使用 bridge 的用量。手動診斷時仍可於 DevTools Console 執行：
 
 ```js
 const orgIds = ['<first-org-id>', '<second-org-id>']
