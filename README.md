@@ -12,20 +12,25 @@ Windows 桌面浮窗，用來查看 Claude 與 Codex 的 5 小時、7 天用量�
 
 | 模式 | 入口 | Reader | 適用情境 |
 | --- | --- | --- | --- |
-| WPF 桌面程式 | `UsageViewer.exe` 或 `scripts\start-wpf-usage-viewer.cmd` | 內建 C# reader | 一般使用與 GitHub Release；self-contained exe 不需安裝 .NET 或 Node.js。 |
+| WPF 桌面程式 | `UsageViewer.exe` 或 `scripts\start-wpf-usage-viewer.cmd` | 內建 C# reader | 一般使用與 GitHub Release；使用 Windows 10/11 內建的 .NET Framework 4.8，不需另外安裝 .NET 或 Node.js。 |
 | PowerShell overlay | `scripts\start-usage-viewer.cmd` | Node.js readers + PowerShell overlay | 開發、除錯，或要直接使用腳本版浮窗時。 |
 
 兩條路徑不會互相啟動；請一次只使用其中一種。`scripts\restart-usage-viewer.cmd` 用於重新啟動目前開發中的 PowerShell overlay、readers 與遠端同步器。
 
 ## 直接使用
 
-從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`，解壓縮後直接執行 `UsageViewer.exe`。
+從 [GitHub Releases](https://github.com/sloth-eat-pudding/usage-viewer/releases) 下載 `UsageViewer-vX.Y.Z-win-x64.zip`（約 0.6 MB），解壓縮到任一資料夾後直接執行 `UsageViewer.exe`。資料夾內的 `.dll`、`UsageViewer.exe.config` 與 `scripts` 需與 exe 放在一起。
+
+程式使用 Windows 10/11 內建的 .NET Framework 4.8，不需安裝其他 runtime。
 
 exe 會在背景讀取本機 Claude/Codex session，並把資料寫入 `%USERPROFILE%\.usage-viewer`。右上角按鈕功能如下：
 
 - `P`：釘選浮窗並讓其餘區域點擊穿透；按 `U` 解除。
-- `Settings`：選擇要顯示的來源、群組與自訂 Claude history 檔案。
+- `Settings`：選擇版面（兩列欄位或逐行堆疊）、來源群組、自訂 Claude history、SSH 來源、Codex 帳號視窗與 Claude Desktop bridge 設定。
 - `×`：結束 viewer 與它啟動的背景 reader。
+- `Ctrl+Alt+P`：切換釘選。
+
+exe 與腳本版共用相同的讀取來源與顯示規則：沒有偵測到 Claude Desktop profile 時顯示 `claude-desktop-latest.json`；沒有設定 SSH 來源時，顯示舊的遠端 Codex 快取（SSH 同步已停用，資料不會再更新）。exe 同時只會執行一個；本機 bridge 埠被占用時，每 15 秒重試一次。
 
 ## 來源與顯示設定
 
@@ -59,9 +64,9 @@ Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`�
 
 Usage Viewer 的 CMD overlay 與 EXE 都會在 `127.0.0.1:8765` 啟動一個只限本機的 bridge。它只接受 Claude Desktop DevTools 從 `https://claude.ai` 傳來的 usage 結果，並依 organization ID 分別保存使用百分比與 5h／7d 的重置時間；不會讀取或保存 Cookie、Authorization header 或完整 API 回應。
 
-在 Claude Desktop 啟用 Developer Mode 後，先執行一次 `scripts\configure-claude-desktop-auto-bridge.ps1`。它會設定 Claude 官方支援的 `CLAUDE_DEV_TOOLS=undocked` 使用者環境變數，讓下一次 Claude 啟動時自動開啟 DevTools。Usage Viewer 會從本機 `plan-usage-history.json` 找出 organization ID，等待鍵鼠閒置後以 Unicode 鍵盤輸入下列等效同步程式，再關閉 DevTools 並恢復原本的前景視窗。Claude 之後每次重啟都會自動再次注入；目前已在執行的 Claude 不會被強制關閉。
+在 Claude Desktop 啟用 Developer Mode 後，先執行一次 `scripts\configure-claude-desktop-auto-bridge.ps1`（exe 使用者可改按 Settings →「Claude Desktop usage bridge」→「Enable automatic bridge」）。它會設定 Claude 官方支援的 `CLAUDE_DEV_TOOLS=undocked` 使用者環境變數，讓下一次 Claude 啟動時自動開啟 DevTools。Usage Viewer 會從本機 `plan-usage-history.json` 找出 organization ID，等待鍵鼠閒置後以 Unicode 鍵盤輸入下列等效同步程式，再關閉 DevTools 並恢復原本的前景視窗。Claude 之後每次重啟都會自動再次注入；目前已在執行的 Claude 不會被強制關閉。
 
-正式版 Claude 會拒絕一般的 remote-debugging/CDP 參數，因此這個流程使用 Claude 自己的 Developer Mode；不會修改 Claude 安裝檔、讀取程序記憶體、Cookie 或 Authorization header。執行 `scripts\configure-claude-desktop-auto-bridge.ps1 -Disable` 可還原由本專案建立的環境設定；`CLAUDE_DESKTOP_AUTO_BRIDGE=0` 可只停用 injector。手動診斷時仍可於 DevTools Console 執行：
+正式版 Claude 會拒絕一般的 remote-debugging/CDP 參數，因此這個流程使用 Claude 自己的 Developer Mode；不會修改 Claude 安裝檔、讀取程序記憶體、Cookie 或 Authorization header。執行 `scripts\configure-claude-desktop-auto-bridge.ps1 -Disable` 可還原由本專案建立的環境設定；`CLAUDE_DESKTOP_AUTO_BRIDGE=0` 可只停用 injector。若某個 profile 的 `plan-usage-history.json` 已不存在，可在 `config\claude-profile-organizations.json`（exe 也會讀取 `%USERPROFILE%\.usage-viewer\claude-profile-organizations.json` 或 exe 旁的 `config` 資料夾）明確對應路徑與 organization ID，讓它繼續使用 bridge 的用量。手動診斷時仍可於 DevTools Console 執行：
 
 ```js
 const orgIds = ['<first-org-id>', '<second-org-id>']
@@ -116,7 +121,7 @@ Usage Viewer 不再透過 SSH/SCP 複製遠端 .codex/sessions，啟動與重啟
 
 修改 reader、overlay、WPF UI 或設定後，先做適當的語法／建置檢查，再執行 `scripts\restart-usage-viewer.cmd`。WPF 與腳本 reader 都必須維持相同的 snapshot 格式與來源分組語意。
 
-完整本機檢查（需 Node.js 與 .NET 7 SDK）：
+完整本機檢查（需 Node.js 與 .NET 8 以上 SDK）：
 
 ```powershell
 .\scripts\test-usage-viewer.ps1
@@ -129,10 +134,10 @@ Usage Viewer 不再透過 SSH/SCP 複製遠端 .codex/sessions，啟動與重啟
 本機 publish：
 
 ```powershell
-dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:SatelliteResourceLanguages=en -o dist
+dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -o dist
 ```
 
-之後可使用 `scripts\start-wpf-usage-viewer.cmd` 啟動 `dist\UsageViewer.exe`。
+之後可使用 `scripts\start-wpf-usage-viewer.cmd` 啟動 `dist\UsageViewer.exe`。專案已設定 `EnableWindowsTargeting`，在 Linux／macOS 上也能用同一個指令建置 Windows 版本。
 
 如需 MSIX，先完成 publish 並安裝 Windows SDK，再執行：
 
@@ -140,7 +145,7 @@ dotnet publish src\UsageViewer\UsageViewer.csproj -c Release -r win-x64 --self-c
 powershell -ExecutionPolicy Bypass -File packaging\build-msix.ps1
 ```
 
-推送 `v` 開頭的 tag 會觸發 GitHub Actions，產生 Windows x64 self-contained exe 的 ZIP、上傳 artifact，並建立或更新 GitHub Release：
+推送 `v` 開頭的 tag 會觸發 GitHub Actions，執行 C# 回歸測試，產生可攜式 Windows 程式的 ZIP、上傳 artifact，並建立或更新 GitHub Release：
 
 ```powershell
 git tag v0.0.10

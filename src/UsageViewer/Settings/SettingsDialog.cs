@@ -47,6 +47,17 @@ internal static class SettingsDialog
         var claudeCli = AddGroupSelector(content, "Claude CLI", settings.ClaudeCliGroup, groupCodes);
         var codexDesktop = AddGroupSelector(content, "Codex Desktop", settings.CodexDesktopGroup, groupCodes);
         var codexCli = AddGroupSelector(content, "Codex CLI", settings.CodexCliGroup, groupCodes);
+        // Used for the legacy remote snapshot while no SSH source is listed below.
+        var defaultSsh = AddGroupSelector(content, "Codex SSH (legacy cache)", settings.FallbackCodexSshGroup, groupCodes);
+        AddSettingsSection(content, "Claude Desktop usage bridge");
+        content.Children.Add(new TextBlock { Text = "After enabling Claude Desktop Developer Mode, enable this once and restart Claude Desktop so usage is injected automatically.", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        var bridgeRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+        var enableBridge = new Button { Content = "Enable automatic bridge", Padding = new Thickness(10, 4, 10, 4) };
+        enableBridge.Click += (_, _) => ConfigureClaudeDesktopBridge(dialog, disable: false);
+        var disableBridge = new Button { Content = "Disable", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 4, 10, 4) };
+        disableBridge.Click += (_, _) => ConfigureClaudeDesktopBridge(dialog, disable: true);
+        bridgeRow.Children.Add(enableBridge); bridgeRow.Children.Add(disableBridge);
+        content.Children.Add(bridgeRow);
         AddSettingsSection(content, "Codex account windows");
         content.Children.Add(new TextBlock { Text = "Choose a data folder for a Codex window with full width, cache timing and cost estimates (Node.js 22+).", Foreground = System.Windows.Media.Brushes.Gray, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
         var codexAccounts = new ComboBox { Width = 260, DisplayMemberPath = nameof(CodexAccountChoice.Name) };
@@ -74,7 +85,7 @@ internal static class SettingsDialog
         addCustom.Click += (_, _) =>
         {
             var name = PromptClaudeEnvironmentName(dialog, customRows.Count + 1);
-            if (string.IsNullOrWhiteSpace(name)) return;
+            if (name is null || string.IsNullOrWhiteSpace(name)) return;
             var profilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Claude-" + SafeProfileName(name));
             Directory.CreateDirectory(profilePath);
             var usageHistoryPath = Path.Combine(profilePath, "plan-usage-history.json");
@@ -91,10 +102,11 @@ internal static class SettingsDialog
         AddSettingsSection(content, "Claude user environment");
         var environmentSelector = new ComboBox { Width = 260, ItemsSource = environmentOptions, SelectedItem = environmentOptions.Contains(settings.ClaudeUserEnvironment, StringComparer.OrdinalIgnoreCase) ? settings.ClaudeUserEnvironment : "default" };
         var openEnvironment = new Button { Content = "Open", Margin = new Thickness(8, 0, 0, 0), Padding = new Thickness(10, 3, 10, 3) }; var selectedEnvironment = environmentSelector.SelectedItem as string ?? "default";
-        openEnvironment.Click += (_, _) => OpenClaudeEnvironment(selectedEnvironment, settings.ClaudeCustomSources);
+        openEnvironment.Click += (_, _) => OpenClaudeEnvironment(dialog, selectedEnvironment, customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList());
         environmentSelector.SelectionChanged += (_, _) => selectedEnvironment = environmentSelector.SelectedItem as string ?? "default";
         var environmentRow = new StackPanel { Orientation = Orientation.Horizontal }; environmentRow.Children.Add(environmentSelector); environmentRow.Children.Add(openEnvironment); content.Children.Add(environmentRow);
-        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { IReadOnlyList<ConfiguredSource> desktopSources = detectedDesktop.Count == 0 ? new List<ConfiguredSource>() : configuredDesktop.Select((source, index) => source with { Group = SelectedGroup(claudeDesktopSelectors[index]) }).ToList(); result = new DisplaySettings(desktopSources, SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment, layoutSelector.SelectedIndex == 1 ? "stacked" : "columns"); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 12, 0, 0) }; var cancel = new Button { Content = "Cancel", MinWidth = 80, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(8, 3, 8, 3) }; cancel.Click += (_, _) => dialog.Close(); var save = new Button { Content = "Save", MinWidth = 80, IsDefault = true, Padding = new Thickness(8, 3, 8, 3) }; save.Click += (_, _) => { IReadOnlyList<ConfiguredSource> desktopSources = detectedDesktop.Count == 0 ? new List<ConfiguredSource>() : configuredDesktop.Select((source, index) => source with { Group = SelectedGroup(claudeDesktopSelectors[index]) }).ToList(); result = new DisplaySettings(desktopSources, SelectedGroup(claudeCli), customRows.Where(row => !string.IsNullOrWhiteSpace(row.Name.Text)).Select(row => row.ToSource()).ToList(), SelectedGroup(codexDesktop), SelectedGroup(codexCli), sshRows.Where(row => !string.IsNullOrWhiteSpace(row.Host.Text)).Select(row => row.ToSource()).ToList(), selectedEnvironment, layoutSelector.SelectedIndex == 1 ? "stacked" : "columns",
+            detectedDesktop.Count == 0 ? SelectedGroup(claudeDesktopSelectors[0]) : settings.FallbackClaudeDesktopGroup, SelectedGroup(defaultSsh)); dialog.Close(); }; actions.Children.Add(cancel); actions.Children.Add(save); Grid.SetRow(actions, 2); root.Children.Add(actions); dialog.ShowDialog();
         return result;
     }
 
@@ -121,7 +133,7 @@ internal static class SettingsDialog
                 {
                     var id = profile.GetProperty("id").GetString();
                     var name = profile.GetProperty("name").GetString();
-                    if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
+                    if (id is not null && name is not null && !string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
                 }
         }
         catch { }
@@ -151,11 +163,46 @@ internal static class SettingsDialog
                 File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(filename.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)));
             }
             var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
-            foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);
-            if (profileId is not null) { start.ArgumentList.Add("-OpenProfileId"); start.ArgumentList.Add(profileId); }
+            var arguments = new List<string> { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") };
+            if (profileId is not null) { arguments.Add("-OpenProfileId"); arguments.Add(profileId); }
+            start.Arguments = FrameworkCompat.JoinArguments(arguments);
             Process.Start(start);
         }
         catch (Exception error) { MessageBox.Show(owner, error.Message, "Codex account window", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
+    // The script setup step (scripts\configure-claude-desktop-auto-bridge.ps1)
+    // is not shipped beside the EXE, so run the embedded copy.
+    private static void ConfigureClaudeDesktopBridge(Window owner, bool disable)
+    {
+        try
+        {
+            var home = Environment.GetEnvironmentVariable("USAGE_VIEWER_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
+            var scripts = Path.Combine(home, "bridge-setup");
+            Directory.CreateDirectory(scripts);
+            foreach (var (resourceName, filename) in new[] {
+                ("UsageViewer.ConfigureClaudeDesktopAutoBridge.ps1", "configure-claude-desktop-auto-bridge.ps1"),
+                ("UsageViewer.ClaudeDesktopProfiles.ps1", "claude-desktop-profiles.ps1") })
+            {
+                using var resource = typeof(SettingsDialog).Assembly.GetManifestResourceStream(resourceName) ?? throw new InvalidDataException($"Missing {resourceName}");
+                using var reader = new StreamReader(resource);
+                File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(true));
+            }
+            var arguments = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(scripts, "configure-claude-desktop-auto-bridge.ps1") };
+            if (disable) arguments.Add("-Disable");
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe", Arguments = FrameworkCompat.JoinArguments(arguments), UseShellExecute = false,
+                CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = scripts
+            }) ?? throw new InvalidOperationException("PowerShell could not be started.");
+            var error = process.StandardError.ReadToEndAsync();
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            var message = string.Join(Environment.NewLine, new[] { output.Trim(), error.Result.Trim() }.Where(text => text.Length > 0));
+            MessageBox.Show(owner, message.Length > 0 ? message : "Done.", "Claude Desktop usage bridge", MessageBoxButton.OK,
+                process.ExitCode == 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception error) { MessageBox.Show(owner, error.Message, "Claude Desktop usage bridge", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
     private static void AddEditorHeader(Panel panel, bool ssh)
@@ -219,34 +266,64 @@ internal static class SettingsDialog
         public ConfiguredSource ToSource() => new(Name.Text.Trim(), Path.Text.Trim(), NormalizeGroup(Group.SelectedItem as string ?? "1"), User.Text.Trim(), Host.Text.Trim(), int.TryParse(Port.Text, out var port) ? port : 22, "", SessionsPath.Text.Trim(), _ssh ? "" : System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Claude-" + SafeProfileName(Name.Text.Trim())));
     }
 
-    private static void OpenClaudeDefault()
+    // Opens the Start menu Claude app like the script overlay; the bare
+    // AppsFolder only showed the app list.
+    private static void OpenClaudeDefault(Window owner)
     {
-        try { Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = "shell:AppsFolder", UseShellExecute = true }); } catch { }
+        var appId = RunPowerShell("$app = Get-StartApps | Where-Object { $_.Name -eq 'Claude' } | Select-Object -First 1; if ($app) { $app.AppID }");
+        if (!string.IsNullOrWhiteSpace(appId))
+        {
+            try { Process.Start(new ProcessStartInfo { FileName = "explorer.exe", Arguments = "shell:AppsFolder\\" + appId, UseShellExecute = true }); return; }
+            catch { }
+        }
+        var executable = FindClaudeExecutable();
+        if (executable is null) { MessageBox.Show(owner, "Claude Start Menu app was not found.", "Claude", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        try { Process.Start(new ProcessStartInfo { FileName = executable, UseShellExecute = true }); }
+        catch (Exception error) { MessageBox.Show(owner, error.Message, "Claude", MessageBoxButton.OK, MessageBoxImage.Error); }
     }
 
-    private static void OpenClaudeSelf()
+    private static void OpenClaudeEnvironment(Window owner, string environment, IReadOnlyList<ConfiguredSource> sources)
+    {
+        if (environment.Equals("default", StringComparison.OrdinalIgnoreCase)) { OpenClaudeDefault(owner); return; }
+        var source = sources.FirstOrDefault(item => item.Name.Equals(environment, StringComparison.OrdinalIgnoreCase));
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var profile = environment.Equals("self", StringComparison.OrdinalIgnoreCase) ? Path.Combine(localAppData, "Claude-Self")
+            : source?.ProfilePath is { } configured && !string.IsNullOrWhiteSpace(configured) ? configured : Path.Combine(localAppData, "Claude-" + SafeProfileName(environment));
+        var executable = FindClaudeExecutable();
+        if (executable is null) { MessageBox.Show(owner, "Claude.exe was not found.", "Claude", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
+        try { Directory.CreateDirectory(profile); Process.Start(new ProcessStartInfo { FileName = executable, Arguments = $"--user-data-dir=\"{profile}\"", UseShellExecute = true }); }
+        catch (Exception error) { MessageBox.Show(owner, error.Message, "Claude", MessageBoxButton.OK, MessageBoxImage.Error); }
+    }
+
+    // Same search order as Get-ClaudeDesktopExecutable in the overlay: the
+    // Store package first, then the per-user installers.
+    private static string? FindClaudeExecutable()
+    {
+        var packageRoot = RunPowerShell("(Get-AppxPackage -Name 'Claude' -ErrorAction SilentlyContinue | Select-Object -First 1).InstallLocation");
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(packageRoot)) candidates.Add(Path.Combine(packageRoot, "app", "Claude.exe"));
+        candidates.Add(Path.Combine(localAppData, "AnthropicClaude", "Claude.exe"));
+        candidates.Add(Path.Combine(localAppData, "Programs", "Claude", "Claude.exe"));
+        candidates.Add(Path.Combine(localAppData, "Claude", "Claude.exe"));
+        return candidates.FirstOrDefault(File.Exists);
+    }
+
+    private static string RunPowerShell(string command)
     {
         try
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(localAppData, "Programs", "Claude", "Claude.exe"), Path.Combine(localAppData, "Claude", "Claude.exe") };
-            var executable = candidates.FirstOrDefault(File.Exists) ?? "Claude.exe";
-            var profile = Path.Combine(localAppData, "Claude-Self");
-            Directory.CreateDirectory(profile);
-            Process.Start(new ProcessStartInfo { FileName = executable, Arguments = $"--user-data-dir=\"{profile}\"", UseShellExecute = true });
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "powershell.exe", Arguments = FrameworkCompat.JoinArguments(new[] { "-NoProfile", "-NonInteractive", "-Command", command }),
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true
+            });
+            if (process is null) return "";
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(10000);
+            return output.Trim();
         }
-        catch { }
-    }
-
-    private static void OpenClaudeEnvironment(string environment, IReadOnlyList<ConfiguredSource> sources)
-    {
-        if (environment.Equals("default", StringComparison.OrdinalIgnoreCase)) { OpenClaudeDefault(); return; }
-        if (environment.Equals("self", StringComparison.OrdinalIgnoreCase)) { OpenClaudeSelf(); return; }
-        var source = sources.FirstOrDefault(item => item.Name.Equals(environment, StringComparison.OrdinalIgnoreCase));
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var profile = string.IsNullOrWhiteSpace(source?.ProfilePath) ? Path.Combine(localAppData, "Claude-" + SafeProfileName(environment)) : source.ProfilePath;
-        var executable = new[] { Path.Combine(localAppData, "Programs", "Claude", "Claude.exe"), Path.Combine(localAppData, "Claude", "Claude.exe") }.FirstOrDefault(File.Exists) ?? "Claude.exe";
-        try { Directory.CreateDirectory(profile); Process.Start(new ProcessStartInfo { FileName = executable, Arguments = $"--user-data-dir=\"{profile}\"", UseShellExecute = true }); } catch { }
+        catch { return ""; }
     }
 
     private static string SafeProfileName(string name) => string.Join("", name.Where(character => char.IsLetterOrDigit(character) || character is '-' or '_'));
@@ -255,6 +332,7 @@ internal static class SettingsDialog
     {
         var groups = settings.ClaudeDesktopSources.Select(source => source.Group)
             .Append(settings.ClaudeCliGroup).Append(settings.CodexDesktopGroup).Append(settings.CodexCliGroup)
+            .Append(settings.FallbackClaudeDesktopGroup).Append(settings.FallbackCodexSshGroup)
             .Concat(settings.ClaudeCustomSources.Select(source => source.Group))
             .Concat(settings.CodexSshSources.Select(source => source.Group));
         var maximum = groups.Select(GroupNumber).DefaultIfEmpty(0).Max();

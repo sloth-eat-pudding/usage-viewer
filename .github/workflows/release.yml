@@ -19,26 +19,25 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "7.0.x"
+          dotnet-version: "8.0.x"
 
-      - name: Publish self-contained Windows app
+      - name: Run C# regression tests
+        shell: pwsh
+        run: dotnet run --project tests/UsageViewer.RegressionTests/UsageViewer.RegressionTests.csproj --configuration Release
+
+      - name: Publish portable Windows app
         shell: pwsh
         run: >-
           dotnet publish src/UsageViewer/UsageViewer.csproj
           --configuration Release
-          --runtime win-x64
-          --self-contained true
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true
-          -p:SatelliteResourceLanguages=en
           --output publish
 
       - name: Create release archive
         shell: pwsh
         run: |
           $archiveName = "UsageViewer-${{ github.ref_name }}-win-x64.zip"
-          Compress-Archive -LiteralPath "publish/UsageViewer.exe" -DestinationPath $archiveName -Force
+          Remove-Item publish/*.pdb -ErrorAction SilentlyContinue
+          Compress-Archive -Path "publish/*" -DestinationPath $archiveName -Force
           "ARCHIVE_NAME=$archiveName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upload workflow artifact

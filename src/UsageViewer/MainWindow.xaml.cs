@@ -32,7 +32,8 @@ public partial class MainWindow : Window
 
     private readonly string _home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".usage-viewer");
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly UsageReaderService _reader = new();
+    private readonly UsageReaderService? _reader;
+    private readonly Mutex? _instanceMutex;
     private DisplaySettings _displaySettings = DisplaySettings.Default;
     private HwndSource? _windowSource;
     private bool _isPinned;
@@ -43,6 +44,23 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _settingsOnly = Environment.GetCommandLineArgs().Any(argument => argument.Equals("--settings", StringComparison.OrdinalIgnoreCase));
+        if (!_settingsOnly)
+        {
+            // Like the script overlay, keep one viewer so the bridge port and
+            // helper processes are never started twice.
+            _instanceMutex = new Mutex(true, "UsageViewer.Wpf.v1", out var createdNew);
+            if (!createdNew)
+            {
+                _instanceMutex.Dispose();
+                _instanceMutex = null;
+                _settingsOnly = true;
+                ShowInTaskbar = false;
+                Opacity = 0;
+                Loaded += (_, _) => Close();
+                return;
+            }
+            _reader = new UsageReaderService();
+        }
         if (_settingsOnly)
         {
             ShowInTaskbar = false;
@@ -77,23 +95,84 @@ public partial class MainWindow : Window
 
     private void Refresh()
     {
-        var lines = new List<string>();
-        var details = new List<string>();
-        AppendGroupedUsage(lines, details, "A", ClaudeSources(), ClaudeUsageLine, ClaudeDetails);
-        AppendGroupedUsage(lines, details, "O", CodexSources(), CodexUsageLine, CodexDetails);
-        MainText.Text = lines.Count == 0 ? "Waiting for usage..." : string.Join("\n", lines);
-        DetailText.Text = string.Join("\n", details);
+        var rows = new List<(string Main, string Detail)>();
+        AppendGroupedUsage(rows, "A", ClaudeSources(), ClaudeUsageLine);
+        AppendGroupedUsage(rows, "O", CodexSources(), CodexUsageLine);
+        var columns = _displaySettings.DisplayLayout != "stacked" && rows.Count > 0;
+        StackedPanel.Visibility = columns ? Visibility.Collapsed : Visibility.Visible;
+        ColumnsPanel.Visibility = columns ? Visibility.Visible : Visibility.Collapsed;
+        if (columns)
+        {
+            UpdateColumns(rows);
+            return;
+        }
+        MainText.Text = rows.Count == 0 ? "Waiting for Claude / Codex usage..." : string.Join("\n", rows.Select(row => row.Main));
+        DetailText.Text = string.Join("\n", rows.Select(row => row.Detail));
+        ReserveDigitWidth(MainText, rows.Select(row => row.Main));
+        ReserveDigitWidth(DetailText, rows.Select(row => row.Detail));
+        DetailText.Visibility = rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private List<UsageSource> ClaudeSources() => ClaudeDesktopSources().Select((source, index) =>
-        new UsageSource(AbbreviateSourceLabel(source.Name, "Claude"), source.Group, Read($"claude-desktop-{index}-latest.json")))
+    private void UpdateColumns(IReadOnlyList<(string Main, string Detail)> rows)
+    {
+        while (ColumnsPanel.Children.Count > rows.Count) ColumnsPanel.Children.RemoveAt(ColumnsPanel.Children.Count - 1);
+        while (ColumnsPanel.Children.Count < rows.Count)
+        {
+            var column = new StackPanel { Margin = new Thickness(ColumnsPanel.Children.Count == 0 ? 0 : 10, 0, 0, 0) };
+            column.Children.Add(new TextBlock { Foreground = MainText.Foreground, FontSize = MainText.FontSize, FontWeight = MainText.FontWeight });
+            column.Children.Add(new TextBlock { Foreground = DetailText.Foreground, FontSize = DetailText.FontSize, Margin = DetailText.Margin });
+            ColumnsPanel.Children.Add(column);
+        }
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var column = (StackPanel)ColumnsPanel.Children[index];
+            var main = (TextBlock)column.Children[0];
+            var detail = (TextBlock)column.Children[1];
+            main.Text = rows[index].Main;
+            detail.Text = rows[index].Detail;
+            // Size both lines of a column together so it keeps one width.
+            var width = Math.Max(ReservedWidth(main, rows[index].Main), ReservedWidth(detail, rows[index].Detail));
+            main.MinWidth = width;
+            detail.MinWidth = width;
+        }
+    }
+
+    // Like the overlay, reserve at least two digit slots for every number
+    // (including countdowns) so refreshes never move later columns or the edge.
+    private void ReserveDigitWidth(TextBlock block, IEnumerable<string> lines) =>
+        block.MinWidth = lines.Select(line => ReservedWidth(block, line)).DefaultIfEmpty(0).Max();
+
+    private double ReservedWidth(TextBlock block, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var placeholder = Regex.Replace(text, "[0-9]+", match => new string('8', Math.Max(2, match.Length)));
+        return Math.Max(MeasureText(block, placeholder), MeasureText(block, text));
+    }
+
+    private double MeasureText(TextBlock block, string text) =>
+        new System.Windows.Media.FormattedText(text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            new System.Windows.Media.Typeface(block.FontFamily, block.FontStyle, block.FontWeight, block.FontStretch),
+            block.FontSize, block.Foreground, System.Windows.Media.VisualTreeHelper.GetDpi(this).PixelsPerDip).WidthIncludingTrailingWhitespace;
+
+    private List<UsageSource> ClaudeSources() => ClaudeDesktopUsageSources()
         .Concat(new[] { new UsageSource("C", _displaySettings.ClaudeCliGroup, Read("claude-statusline-latest.json")) })
         .Concat(_displaySettings.ClaudeCustomSources.Select((source, index) =>
             new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"Custom {index + 1}" : source.Name, "Claude"),
                 source.Group, Read($"claude-custom-{index}-latest.json")))).ToList();
 
+    private IEnumerable<UsageSource> ClaudeDesktopUsageSources()
+    {
+        var desktop = ClaudeDesktopSources();
+        // Without a detected profile, the script overlay still shows the
+        // reader's combined Desktop snapshot; keep that source visible here.
+        if (desktop.Count == 0)
+            return new[] { new UsageSource("D", _displaySettings.ClaudeDesktopGroup, Read("claude-desktop-latest.json")) };
+        return desktop.Select((source, index) =>
+            new UsageSource(AbbreviateSourceLabel(source.Name, "Claude"), source.Group, Read($"claude-desktop-{index}-latest.json")));
+    }
+
     private IReadOnlyList<ConfiguredSource> ClaudeDesktopSources() =>
-        ClaudeDesktopProfiles.Find().Select(profile =>
+        ClaudeDesktopProfiles.FindWithMappings().Select(profile =>
         {
             var saved = _displaySettings.ClaudeDesktopSources.FirstOrDefault(source =>
                 source.Path.Equals(profile.Path, StringComparison.OrdinalIgnoreCase) ||
@@ -107,13 +186,22 @@ public partial class MainWindow : Window
         new UsageSource("C", _displaySettings.CodexCliGroup, Read("codex-cli-latest.json"))
     }.Concat(CodexDesktopProfiles.ReadAccounts(_home).Select(account =>
             new UsageSource(AbbreviateSourceLabel(account.Name, "Codex"), "account:" + account.Id, account.Snapshot)))
-        .Concat(_displaySettings.CodexSshSources.Select((source, index) =>
+        .Concat(CodexSshUsageSources()).ToList();
+
+    private IEnumerable<UsageSource> CodexSshUsageSources()
+    {
+        // With no configured SSH source the overlay still shows the legacy
+        // remote snapshot (SSH copying is disabled, so it may be stale).
+        if (_displaySettings.CodexSshSources.Count == 0)
+            return new[] { new UsageSource("SSH 1", _displaySettings.CodexSshGroup, ReadRemoteSnapshot(0)) };
+        return _displaySettings.CodexSshSources.Select((source, index) =>
             new UsageSource(AbbreviateSourceLabel(string.IsNullOrWhiteSpace(source.Name) ? $"SSH {index + 1}" : source.Name, "Codex"),
-                source.Group, ReadRemoteSnapshot(index)))).ToList();
+                source.Group, ReadRemoteSnapshot(index)));
+    }
 
     private static string AbbreviateSourceLabel(string label, string product)
     {
-        var words = Regex.Matches(label, @"[\p{L}\p{N}]+")
+        var words = Regex.Matches(label, @"[\p{L}\p{N}]+").Cast<Match>()
             .Select(match => match.Value)
             .Where(word => !word.All(char.IsDigit))
             .ToList();
@@ -133,12 +221,10 @@ public partial class MainWindow : Window
     }
 
     private static void AppendGroupedUsage(
-        List<string> lines,
-        List<string> details,
+        List<(string Main, string Detail)> rows,
         string product,
         IEnumerable<UsageSource> sources,
-        Func<JsonElement?, string> usageLine,
-        Func<JsonElement?, string> detailLine)
+        Func<JsonElement?, string> usageLine)
     {
         foreach (var group in sources
             .Where(source => source.Snapshot is not null && source.Group != "Hidden")
@@ -147,9 +233,7 @@ public partial class MainWindow : Window
         {
             var newest = group.OrderByDescending(source => Timestamp(source.Snapshot)).First();
             var labels = string.Join("+", group.Select(source => source.Label));
-            lines.Add($"{product,-2}{usageLine(newest.Snapshot)}  ({labels})");
-            var detail = detailLine(newest.Snapshot);
-            if (!string.IsNullOrWhiteSpace(detail)) details.Add($"{product,-2}{detail}  ({labels})");
+            rows.Add(($"{product} {usageLine(newest.Snapshot)} ({labels})", $"{product} {Details(newest.Snapshot)} ({labels})"));
         }
     }
 
@@ -184,50 +268,25 @@ public partial class MainWindow : Window
         catch { return null; }
     }
 
-    private static string Percent(JsonElement? root, string name)
+    private static string Percent(JsonElement? root, string name, string missing)
     {
-        if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return "-";
-        return $"{value.GetDouble():0.##}%";
+        if (root is null || !root.Value.TryGetProperty("percentages", out var percentages) || !percentages.TryGetProperty(name, out var value) || value.ValueKind != JsonValueKind.Number) return missing;
+        return $"{value.GetDouble().ToString("00.##", CultureInfo.InvariantCulture)}%";
     }
 
-    private static string ClaudeUsageLine(JsonElement? root)
-    {
-        var fiveHour = Percent(root, "five_hour_used");
-        var sevenDay = Percent(root, "seven_day_used");
-        return $"7d {sevenDay}  |  5h {fiveHour}";
-    }
+    // Same text as the script overlay: Claude shows "?" and Codex "-" for a missing window.
+    private static string ClaudeUsageLine(JsonElement? root) =>
+        $"7d {Percent(root, "seven_day_used", "?")} | 5h {Percent(root, "five_hour_used", "?")}";
 
-    private static string CodexUsageLine(JsonElement? root)
-    {
-        var weekly = Percent(root, "seven_day_used");
-        var fiveHour = Percent(root, "five_hour_used");
-        return $"7d {weekly}  |  5h {fiveHour}";
-    }
+    private static string CodexUsageLine(JsonElement? root) =>
+        $"7d {Percent(root, "seven_day_used", "-")} | 5h {Percent(root, "five_hour_used", "-")}";
 
-    private static string ClaudeDetails(JsonElement? root)
+    private static string Details(JsonElement? root)
     {
         if (root is null) return "";
-        var parts = new List<string>();
         var sevenDay = Reset(root.Value, "seven_day_epoch_seconds", "7d", relative: false);
         var fiveHour = Reset(root.Value, "five_hour_epoch_seconds", "5h", relative: false);
-        parts.Add(string.IsNullOrWhiteSpace(sevenDay) ? "?" : sevenDay);
-        parts.Add(string.IsNullOrWhiteSpace(fiveHour) ? "?" : fiveHour);
-        var age = Age(root);
-        if (!string.IsNullOrWhiteSpace(age)) parts.Add(age);
-        return string.Join(" | ", parts);
-    }
-
-    private static string CodexDetails(JsonElement? root)
-    {
-        if (root is null) return "";
-        var parts = new List<string>();
-        var sevenDay = Reset(root.Value, "seven_day_epoch_seconds", "7d", relative: false);
-        var fiveHour = Reset(root.Value, "five_hour_epoch_seconds", "5h", relative: false);
-        if (!string.IsNullOrWhiteSpace(sevenDay)) parts.Add(sevenDay);
-        if (!string.IsNullOrWhiteSpace(fiveHour)) parts.Add(fiveHour);
-        var age = Age(root);
-        if (!string.IsNullOrWhiteSpace(age)) parts.Add(age);
-        return string.Join(" | ", parts);
+        return $"{(string.IsNullOrWhiteSpace(sevenDay) ? "?" : sevenDay)} | {(string.IsNullOrWhiteSpace(fiveHour) ? "?" : fiveHour)} | {Age(root)}";
     }
 
     private static string Reset(JsonElement root, string name, string label, bool relative)
@@ -316,6 +375,7 @@ public partial class MainWindow : Window
         OverlayBorder.BorderBrush = _isPinned ? System.Windows.Media.Brushes.Transparent : System.Windows.Media.Brushes.DimGray;
         SettingsButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         CloseButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
+        MinWidth = _isPinned ? 180 : 340;
         EnsureTopmost();
     }
 
@@ -368,8 +428,13 @@ public partial class MainWindow : Window
     {
         if (!_settingsOnly) SaveWindowState();
         _timer.Stop();
-        _reader.Dispose();
+        _reader?.Dispose();
         _windowSource?.RemoveHook(WindowMessageHook);
+        if (_instanceMutex is not null)
+        {
+            _instanceMutex.ReleaseMutex();
+            _instanceMutex.Dispose();
+        }
         base.OnClosed(e);
     }
 

@@ -30,7 +30,7 @@ internal static class CodexDesktopProfiles
             foreach (var profile in registry.RootElement.GetProperty("profiles").EnumerateArray())
             {
                 var id = StringOrNull(profile, "id");
-                if (string.IsNullOrEmpty(id) || id == "default" || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_' && c != '-')) continue;
+                if (id is null || id.Length == 0 || id == "default" || id.Any(c => !FrameworkCompat.IsAsciiLetterOrDigit(c) && c != '_' && c != '-')) continue;
                 var snapshot = ReadFresh(Path.Combine(home, $"codex-account-{id}-latest.json"), id);
                 if (snapshot is not null) result.Add((StringOrNull(profile, "name") ?? id, id, snapshot.Value));
             }

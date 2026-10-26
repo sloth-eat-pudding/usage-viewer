@@ -33,7 +33,7 @@ Reader 建構時不啟動背景程序。測試可指定獨立的 snapshot 目錄
 .\scripts\test-usage-viewer.ps1
 ```
 
-需要 Windows、Node.js 與 .NET 7 SDK。此入口不會重啟 viewer；修改完成後仍須執行 `scripts\restart-usage-viewer.cmd`。
+需要 Windows、Node.js 與 .NET 8 以上 SDK。WPF 程式目標為 .NET Framework 4.8；在 Windows 上 C# 回歸程式同樣以 net48 執行，其他平台則改用 net8.0。此入口不會重啟 viewer；修改完成後仍須執行 `scripts\restart-usage-viewer.cmd`。
 
 C# 回歸程式直接編譯正式元件，不需要額外的測試套件，涵蓋多帳號隔離、來源選擇、過期／損毀 snapshot、Codex 事件順序與空目錄、遠端時間保護、設定相容，以及並行原子寫入。既有 injector 測試只載入純函式並編譯原生 helper，不呼叫其鍵盤／視窗操作；HTTP 測試啟動獨立的測試 bridge。
 

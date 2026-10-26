@@ -28,7 +28,7 @@ internal sealed class ClaudeUsageReader : IDisposable
     {
         _store = store;
         _home = store.Home;
-        _claudePlanUsageHistories = histories ?? FindClaudePlanUsageHistories();
+        _claudePlanUsageHistories = histories ?? ClaudeDesktopProfiles.FindWithMappings(_home).Select(profile => profile.Path).ToList();
         _claudePlanUsageHistory = FindSelectedClaudePlanUsageHistory(_claudePlanUsageHistories);
     }
 
@@ -110,11 +110,13 @@ internal sealed class ClaudeUsageReader : IDisposable
         for (var index = 0; index < _claudePlanUsageHistories.Count; index++)
         {
             var sourcePath = _claudePlanUsageHistories[index];
-            var sourceWriteTime = TryGetWriteTimeUtc(sourcePath);
             var plan = ReadClaudePlanUsage(sourcePath);
-            if (plan is null || sourceWriteTime is null) continue;
+            if (plan is null) continue;
 
             var desktopApi = ClaudeDesktopApiUsage.Read(_home, plan.Organization);
+            // A mapped profile has no history file; its API snapshot dates it.
+            var sourceWriteTime = TryGetWriteTimeUtc(sourcePath) ?? desktopApi?.ObservedAt;
+            if (sourceWriteTime is null) continue;
             var observedAt = sourceWriteTime.Value;
             if (desktopApi is not null && desktopApi.ObservedAt > observedAt) observedAt = desktopApi.ObservedAt;
             _store.Write($"claude-desktop-{index}-latest.json", new {
@@ -181,7 +183,7 @@ internal sealed class ClaudeUsageReader : IDisposable
                     CreateNoWindow = true
                 }
             };
-            var commandLine = command.Contains(' ', StringComparison.Ordinal)
+            var commandLine = command.Contains(" ")
                 ? $"\"{command}\" -p /usage"
                 : $"{command} -p /usage";
             process.StartInfo.Arguments = $"/d /s /c \"{commandLine}\"";
@@ -193,7 +195,7 @@ internal sealed class ClaudeUsageReader : IDisposable
             if (!process.Start()) { TraceClaude("process start returned false"); return false; }
             if (!process.WaitForExit(15000))
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
+                try { FrameworkCompat.KillTree(process); } catch { }
                 TraceClaude("timeout");
                 return false;
             }
@@ -210,7 +212,7 @@ internal sealed class ClaudeUsageReader : IDisposable
                 try
                 {
                     if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
-                        _activeClaudeProcess.Kill(entireProcessTree: true);
+                        FrameworkCompat.KillTree(_activeClaudeProcess);
                 }
                 catch { }
                 _activeClaudeProcess = null;
@@ -234,7 +236,7 @@ internal sealed class ClaudeUsageReader : IDisposable
         catch { }
 
         var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var directory in path.Split(new[] { Path.PathSeparator }, StringSplitOptions.RemoveEmptyEntries).Select(entry => entry.Trim()).Where(entry => entry.Length > 0))
         {
             foreach (var name in new[] { "claude.exe", "claude.cmd", "claude.bat", "claude" })
             {
@@ -302,9 +304,16 @@ internal sealed class ClaudeUsageReader : IDisposable
 
     private ClaudePlanUsage? ReadClaudePlanUsage() => ReadClaudePlanUsage(_claudePlanUsageHistory);
 
-    private static ClaudePlanUsage? ReadClaudePlanUsage(string? sourcePath)
+    private ClaudePlanUsage? ReadClaudePlanUsage(string? sourcePath)
     {
-        if (sourcePath is null || !File.Exists(sourcePath)) return null;
+        if (sourcePath is null) return null;
+        sourcePath = ClaudeDesktopProfiles.Resolve(sourcePath);
+        if (!File.Exists(sourcePath))
+        {
+            // Only an explicit profile mapping may stand in for a missing history file.
+            var organization = ClaudeDesktopProfiles.MappedOrganization(sourcePath, _home);
+            return organization is null ? null : new ClaudePlanUsage(DateTimeOffset.FromUnixTimeMilliseconds(0), null, null, organization, null, null);
+        }
 
         try
         {
@@ -325,7 +334,7 @@ internal sealed class ClaudeUsageReader : IDisposable
 
             if (parsed.Count == 0) return null;
             parsed.Sort((left, right) => left.Time.CompareTo(right.Time));
-            var current = parsed[^1];
+            var current = parsed[parsed.Count - 1];
             return new ClaudePlanUsage(
                 current.Time,
                 current.FiveHour,
@@ -367,7 +376,7 @@ internal sealed class ClaudeUsageReader : IDisposable
 
     private static DateTimeOffset? EstimateFiveHourReset(IReadOnlyList<ClaudePlanSample> samples)
     {
-        var latest = samples[^1];
+        var latest = samples[samples.Count - 1];
         if (latest.FiveHour is null || latest.FiveHour <= 0) return null;
 
         var start = samples.Count - 1;
@@ -420,9 +429,6 @@ internal sealed class ClaudeUsageReader : IDisposable
         catch { return null; }
     }
 
-    private static IReadOnlyList<string> FindClaudePlanUsageHistories() =>
-        ClaudeDesktopProfiles.Find().Select(profile => profile.Path).ToList();
-
     private string? FindSelectedClaudePlanUsageHistory(IReadOnlyList<string> defaults)
     {
         var settingsPath = Path.Combine(_home, "display-settings.json");
@@ -452,8 +458,8 @@ internal sealed class ClaudeUsageReader : IDisposable
                         {
                             var name = source.TryGetProperty("name", out var n) ? n.GetString() : null;
                             var path = source.TryGetProperty("path", out var p) ? p.GetString() : null;
-                            if (string.Equals(name, environment, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(path) && File.Exists(path))
-                                return path;
+                            if (string.Equals(name, environment, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(path) && File.Exists(ClaudeDesktopProfiles.Resolve(path!)))
+                                return ClaudeDesktopProfiles.Resolve(path!);
                         }
                     }
                 }
@@ -477,7 +483,7 @@ internal sealed class ClaudeUsageReader : IDisposable
             try
             {
                 if (_activeClaudeProcess is not null && !_activeClaudeProcess.HasExited)
-                    _activeClaudeProcess.Kill(entireProcessTree: true);
+                    FrameworkCompat.KillTree(_activeClaudeProcess);
             }
             catch { }
             _activeClaudeProcess = null;
