@@ -21,6 +21,8 @@ $form = New-Object System.Windows.Forms.Form
 $form.MinimumSize = [System.Drawing.Size]::new(180, 56)
 $main = New-Object System.Windows.Forms.Label
 $detail = New-Object System.Windows.Forms.Label
+$main.Font = New-Object System.Drawing.Font('Segoe UI', 10.5, [System.Drawing.FontStyle]::Bold)
+$detail.Font = New-Object System.Drawing.Font('Segoe UI', 8.25, [System.Drawing.FontStyle]::Regular)
 $form.Controls.Add($main)
 $form.Controls.Add($detail)
 $form.ShowInTaskbar = $false
@@ -41,6 +43,39 @@ try {
     $previousRight = $column.Main.Right
   }
   Assert-True ($form.ClientSize.Width -ge $previousRight + 66) 'Controls must not cover the last column'
+  # Refresh the same groups across digit boundaries in both layouts and pin
+  # states. Verify geometry, not just the text measurement helper.
+  foreach ($layout in @('columns', 'stacked')) {
+    $script:DisplayLayout = $layout
+    foreach ($pinned in @($false, $true)) {
+      $script:IsPinned = $pinned
+      $expectedSize = $null
+      $expectedBounds = $null
+      foreach ($value in @(9, 10, 99, 100, 1, 11, 0)) {
+        $main.Text = (@("A  5h $value%  7d $value% (D)", 'O  5h 50%  7d 60% (D+C)') -join "`n")
+        $detail.Text = (@("Reset in ${value}h / ${value}d | ${value}m ago (source 1)", 'Reset in 4h / 6d | now (source 2)') -join "`n")
+        Resize-OverlayToContent -Form $form -Main $main -Detail $detail
+        $bounds = @($script:usageColumnControls | ForEach-Object { "$($_.Main.Bounds)|$($_.Detail.Bounds)" }) -join ';'
+        if ($null -eq $expectedSize) {
+          $expectedSize = $form.ClientSize
+          $expectedBounds = $bounds
+        }
+        Assert-True ($form.ClientSize -eq $expectedSize -and $bounds -eq $expectedBounds) "Numeric refresh must preserve $layout geometry (pinned=$pinned, value=$value)"
+        Assert-True ($main.Text.Contains("$value%")) 'Reserved space must not change displayed values'
+        foreach ($column in $script:usageColumnControls) {
+          foreach ($label in @($column.Main, $column.Detail)) {
+            $actualWidth = [System.Windows.Forms.TextRenderer]::MeasureText($label.Text, $label.Font).Width
+            Assert-True ($label.Width -ge $actualWidth) 'Reserved columns must not clip text'
+          }
+        }
+      }
+    }
+  }
+  $script:IsPinned = $false
+  $script:DisplayLayout = 'columns'
+  $main.Text = (@('A  5h 10%  7d 20% (D)', 'A  5h 30%  7d 40% (S)', 'O  5h 50%  7d 60% (D+C)', 'O  5h 70%  7d 80% (R)') -join "`n")
+  $detail.Text = ((1..4 | ForEach-Object { "Reset in 4h / 6d | now (source $_)" }) -join "`n")
+  Resize-OverlayToContent -Form $form -Main $main -Detail $detail
   $script:DisplayLayout = 'stacked'
   $oldColumn = $script:usageColumnControls[0].Main
   Resize-OverlayToContent -Form $form -Main $main -Detail $detail
