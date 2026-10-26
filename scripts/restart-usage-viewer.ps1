@@ -1,4 +1,7 @@
 $ErrorActionPreference = 'Stop'
+# This entry point restarts the shared dashboard and readers. Codex account
+# windows inherit a profile-specific home, which must not split these services.
+$env:USAGE_VIEWER_HOME = Join-Path $env:USERPROFILE '.usage-viewer'
 $patterns = @(
   '*UsageOverlay.ps1*',
   '*sync-codex-remote.ps1*',
