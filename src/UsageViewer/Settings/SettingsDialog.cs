@@ -121,7 +121,7 @@ internal static class SettingsDialog
                 {
                     var id = profile.GetProperty("id").GetString();
                     var name = profile.GetProperty("name").GetString();
-                    if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
+                    if (id is not null && name is not null && !string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name)) accounts.Add(new(id, name));
                 }
         }
         catch { }
@@ -151,8 +151,9 @@ internal static class SettingsDialog
                 File.WriteAllText(Path.Combine(scripts, filename), reader.ReadToEnd(), new System.Text.UTF8Encoding(filename.EndsWith(".ps1", StringComparison.OrdinalIgnoreCase)));
             }
             var start = new ProcessStartInfo { FileName = "powershell.exe", UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = scripts };
-            foreach (var argument in new[] { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") }) start.ArgumentList.Add(argument);
-            if (profileId is not null) { start.ArgumentList.Add("-OpenProfileId"); start.ArgumentList.Add(profileId); }
+            var arguments = new List<string> { "-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", Path.Combine(scripts, "create-codex-account-profile.ps1") };
+            if (profileId is not null) { arguments.Add("-OpenProfileId"); arguments.Add(profileId); }
+            start.Arguments = FrameworkCompat.JoinArguments(arguments);
             Process.Start(start);
         }
         catch (Exception error) { MessageBox.Show(owner, error.Message, "Codex account window", MessageBoxButton.OK, MessageBoxImage.Error); }

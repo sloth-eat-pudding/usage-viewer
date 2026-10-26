@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 #if NETFRAMEWORK
 namespace System.Runtime.CompilerServices
@@ -67,6 +68,36 @@ namespace UsageViewer
 #else
             process.Kill(entireProcessTree: true);
 #endif
+        }
+
+        internal static bool IsAsciiLetterOrDigit(char c) =>
+            c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9';
+
+        // ProcessStartInfo.ArgumentList is unavailable on .NET Framework; quote
+        // each argument the way it does so CommandLineToArgvW splits it back.
+        internal static string JoinArguments(IEnumerable<string> arguments)
+        {
+            var builder = new StringBuilder();
+            foreach (var argument in arguments)
+            {
+                if (builder.Length > 0) builder.Append(' ');
+                if (argument.Length > 0 && argument.All(c => !char.IsWhiteSpace(c) && c != '"'))
+                {
+                    builder.Append(argument);
+                    continue;
+                }
+                builder.Append('"');
+                var backslashes = 0;
+                foreach (var c in argument)
+                {
+                    if (c == '\\') { backslashes++; continue; }
+                    builder.Append('\\', c == '"' ? backslashes * 2 + 1 : backslashes);
+                    backslashes = 0;
+                    builder.Append(c);
+                }
+                builder.Append('\\', backslashes * 2).Append('"');
+            }
+            return builder.ToString();
         }
 
 #if NETFRAMEWORK

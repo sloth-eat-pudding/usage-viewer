@@ -14,7 +14,8 @@ var tests = new (string Name, Action Run)[]
     ("Codex desktop bridge pairing and cache expiry", CodexBridge),
     ("Remote snapshot monotonicity", RemoteSnapshots),
     ("Legacy settings migration and source round trip", Settings),
-    ("Concurrent snapshot writes remain complete JSON", ConcurrentWrites)
+    ("Concurrent snapshot writes remain complete JSON", ConcurrentWrites),
+    ("Process argument quoting", ArgumentQuoting)
 };
 var failed = 0;
 foreach (var test in tests)
@@ -24,6 +25,13 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failed}/{tests.Length} regression groups passed.");
 return failed == 0 ? 0 : 1;
+
+static void ArgumentQuoting()
+{
+    Equal("-File \"C:\\Program Files\\a.ps1\" -Id abc", FrameworkCompat.JoinArguments(new[] { "-File", @"C:\Program Files\a.ps1", "-Id", "abc" }), "Paths with spaces");
+    Equal("\"\" \"a\\\"b\" \"c d\\\\\"", FrameworkCompat.JoinArguments(new[] { "", "a\"b", @"c d\" }), "Empty, quote and trailing backslash");
+    Equal(@"a\b", FrameworkCompat.JoinArguments(new[] { @"a\b" }), "Plain backslashes stay unquoted");
+}
 
 static void CodexBridge()
 {
