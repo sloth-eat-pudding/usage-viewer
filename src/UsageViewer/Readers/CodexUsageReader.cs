@@ -44,6 +44,8 @@ internal sealed class CodexUsageReader : IDisposable
 
     internal void Refresh()
     {
+        var desktopEnabled = UsageSourcePolicy.Enabled(_home, "codex_desktop_group");
+        var cliEnabled = UsageSourcePolicy.Enabled(_home, "codex_cli_group");
         // The watcher makes normal updates cheap, but it can lose events when its
         // internal buffer overflows or a file is replaced while being written.
         // Keep a periodic full scan so one missed event cannot permanently freeze
@@ -53,7 +55,7 @@ internal sealed class CodexUsageReader : IDisposable
         if (_codexWatcher is not null && !dirty && now < _nextCodexPollUtc) return;
         _nextCodexPollUtc = now + CodexPollInterval;
         var root = _sessionsRoot;
-        var bridge = CodexDesktopProfiles.ReadFresh(Path.Combine(_home, "codex-desktop-bridge-latest.json"), "default");
+        var bridge = desktopEnabled ? CodexDesktopProfiles.ReadFresh(Path.Combine(_home, "codex-desktop-bridge-latest.json"), "default") : null;
         if (bridge is not null)
         {
             _store.Write("codex-desktop-latest.json", bridge.Value);
@@ -62,6 +64,7 @@ internal sealed class CodexUsageReader : IDisposable
         var localCandidates = new List<CodexCandidate>();
         foreach (var mode in new[] { "desktop", "cli" })
         {
+            if (mode == "desktop" ? !desktopEnabled : !cliEnabled) continue;
             var local = FindLatestCodexUsage(root, mode);
             if (local is not null)
             {
@@ -75,11 +78,12 @@ internal sealed class CodexUsageReader : IDisposable
         var remoteSources = _store.ReadConfiguredSources("remote-sources.json");
         for (var index = 0; index < remoteSources.Count; index++)
         {
+            if (UsageSourcePolicy.Hidden(StringOrNull(remoteSources[index], "group"))) continue;
             var remoteLatest = FindLatestCodexUsage(Path.Combine(remoteRoot, index.ToString(), "sessions"));
             if (remoteLatest is not null && _store.IsNotOlder($"codex-remote-{index}-latest.json", remoteLatest.Value.Time))
                 WriteCodexSnapshot($"codex-remote-{index}-latest.json", remoteLatest.Value);
         }
-        if (remoteSources.Count == 0)
+        if (remoteSources.Count == 0 && UsageSourcePolicy.Enabled(_home, "codex_ssh_group"))
         {
             var remoteLatest = FindLatestCodexUsage(Path.Combine(remoteRoot, "sessions"));
             if (remoteLatest is not null && _store.IsNotOlder("codex-remote-0-latest.json", remoteLatest.Value.Time))

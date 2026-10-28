@@ -80,6 +80,14 @@ internal sealed class ClaudeDesktopUsageBridge : IDisposable
                 await WriteBridgeResponse(response, 200, "{\"status\":\"ok\"}");
                 return;
             }
+            if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/usage-enabled")
+            {
+                if (!allowedOrigin) { await WriteBridgeResponse(response, 403); return; }
+                var organization = request.QueryString["org"] ?? "";
+                if (!Guid.TryParse(organization, out _)) { await WriteBridgeResponse(response, 400); return; }
+                await WriteBridgeResponse(response, 200, JsonSerializer.Serialize(new { enabled = UsageSourcePolicy.OrganizationEnabled(_home, organization) }), origin);
+                return;
+            }
             if (request.HttpMethod == "OPTIONS")
             {
                 if (!allowedOrigin) { await WriteBridgeResponse(response, 403); return; }

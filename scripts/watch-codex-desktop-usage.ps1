@@ -1,5 +1,6 @@
 param([switch]$Once)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'usage-source-policy.ps1')
 $usageHome = Join-Path $env:USERPROFILE '.usage-viewer'
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $driver = Join-Path $PSScriptRoot 'codex-desktop-usage.cjs'
@@ -37,6 +38,7 @@ function Get-DesktopSources {
       # Unregistered test instances are deliberately excluded.
       continue
     }
+    if ($id -eq 'default' -and -not (Test-UsageSourceEnabled $usageHome 'codex_desktop_group')) { continue }
     try {
       $version = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 3
       $socket = [Uri]$version.webSocketDebuggerUrl

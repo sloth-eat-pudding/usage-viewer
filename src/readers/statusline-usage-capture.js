@@ -3,6 +3,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { enabled } = require('./usage-source-policy')
 
 const APP_DIRECTORY = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
@@ -23,6 +24,10 @@ process.stdin.on('end', () => {
   try {
     const data = JSON.parse(stdin || '{}')
     const snapshot = buildSnapshot(data)
+    if (!enabled(APP_DIRECTORY, 'claude_cli_group')) {
+      process.stdout.write(formatStatusLine(snapshot))
+      return
+    }
 
     fs.mkdirSync(APP_DIRECTORY, { recursive: true })
     writeJsonAtomic(CLAUDE_STATUSLINE_LATEST_FILE, snapshot)

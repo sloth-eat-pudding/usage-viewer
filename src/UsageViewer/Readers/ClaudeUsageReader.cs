@@ -36,14 +36,17 @@ internal sealed class ClaudeUsageReader : IDisposable
     {
         WriteConfiguredClaudeSource();
         WriteClaudeDesktopSnapshots();
+        var cliEnabled = UsageSourcePolicy.Enabled(_home, "claude_cli_group");
+        var desktopEnabled = UsageSourcePolicy.Enabled(_home, "claude_desktop_group", _claudePlanUsageHistory);
+        if (!cliEnabled && !desktopEnabled) return;
         // A fresh Desktop API response is authoritative for its organization;
         // do not let the CLI command's cached result defer applying it.
-        var hasFreshDesktopApi = ReadClaudePlanUsage() is { Organization: { } organization } && ClaudeDesktopApiUsage.Read(_home, organization) is not null;
-        if (!hasFreshDesktopApi && TryWriteClaudeUsageFromCommand()) return;
+        var hasFreshDesktopApi = desktopEnabled && ReadClaudePlanUsage() is { Organization: { } organization } && ClaudeDesktopApiUsage.Read(_home, organization) is not null;
+        if (cliEnabled && !hasFreshDesktopApi && TryWriteClaudeUsageFromCommand()) return;
 
         var cliSource = Path.Combine(_home, "claude-statusline-latest.json");
-        var desktopSource = _claudePlanUsageHistory;
-        var cliWriteTime = TryGetWriteTimeUtc(cliSource);
+        var desktopSource = desktopEnabled ? _claudePlanUsageHistory : null;
+        var cliWriteTime = cliEnabled ? TryGetWriteTimeUtc(cliSource) : null;
         var desktopWriteTime = desktopSource is null ? null : TryGetWriteTimeUtc(desktopSource);
 
         var useCli = cliWriteTime is not null &&
@@ -55,7 +58,7 @@ internal sealed class ClaudeUsageReader : IDisposable
         }
         var selectedSource = useCli ? cliSource : desktopSource;
         var sourceWriteTime = useCli ? cliWriteTime : desktopWriteTime;
-        var desktopPlan = useCli ? null : ReadClaudePlanUsage();
+        var desktopPlan = useCli || !desktopEnabled ? null : ReadClaudePlanUsage();
         var desktopApi = desktopPlan is null ? null : ClaudeDesktopApiUsage.Read(_home, desktopPlan.Organization);
         if (desktopApi is not null && (sourceWriteTime is null || desktopApi.ObservedAt > sourceWriteTime.Value))
             sourceWriteTime = desktopApi.ObservedAt;
@@ -110,6 +113,7 @@ internal sealed class ClaudeUsageReader : IDisposable
         for (var index = 0; index < _claudePlanUsageHistories.Count; index++)
         {
             var sourcePath = _claudePlanUsageHistories[index];
+            if (!UsageSourcePolicy.Enabled(_home, "claude_desktop_group", sourcePath)) continue;
             var plan = ReadClaudePlanUsage(sourcePath);
             if (plan is null) continue;
 
@@ -360,6 +364,7 @@ internal sealed class ClaudeUsageReader : IDisposable
             {
                 var path = StringOrNull(sources[index], "path");
                 if (string.IsNullOrWhiteSpace(path)) continue;
+                if (!UsageSourcePolicy.Enabled(_home, "claude_custom_group", path)) continue;
                 var usage = ReadClaudePlanUsage(path);
                 if (usage is null) continue;
                 var desktopApi = ClaudeDesktopApiUsage.Read(_home, usage.Organization);

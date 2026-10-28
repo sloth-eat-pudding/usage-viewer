@@ -3,6 +3,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { enabled } = require('./usage-source-policy')
 
 const CODEX_HOME = process.env.CODEX_HOME ||
   path.join(os.homedir(), '.codex')
@@ -22,8 +23,11 @@ const CODEX_CLI_LATEST_FILE = path.join(USAGE_VIEWER_HOME, 'codex-cli-latest.jso
 const HISTORY_FILE = path.join(USAGE_VIEWER_HOME, 'codex-history.jsonl')
 
 try {
+  if (!enabled(USAGE_VIEWER_HOME, 'codex_desktop_group') && !enabled(USAGE_VIEWER_HOME, 'codex_cli_group') &&
+      !enabled(USAGE_VIEWER_HOME, 'codex_ssh_group')) process.exit(0)
   const snapshots = readCodexUsageByMode()
   const snapshot = snapshots.selected
+  if (!snapshot) process.exit(0)
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   if (snapshots.desktop) writeJsonAtomic(CODEX_DESKTOP_LATEST_FILE, snapshots.desktop)
   if (snapshots.cli) writeJsonAtomic(CODEX_CLI_LATEST_FILE, snapshots.cli)
@@ -48,15 +52,16 @@ try {
 }
 
 function readCodexUsageByMode() {
-  const localSessions = findLatestUsageSessionsByMode(SESSIONS_DIRECTORY)
+  const localSessions = enabled(USAGE_VIEWER_HOME, 'codex_desktop_group') || enabled(USAGE_VIEWER_HOME, 'codex_cli_group')
+    ? findLatestUsageSessionsByMode(SESSIONS_DIRECTORY) : {}
   const remotes = readConfiguredRemoteSnapshots()
-  const remoteSessions = findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY)
-  const sessionDesktop = localSessions.desktop
+  const remoteSessions = enabled(USAGE_VIEWER_HOME, 'codex_ssh_group') ? findLatestUsageSessionsByMode(REMOTE_SESSIONS_DIRECTORY) : {}
+  const sessionDesktop = enabled(USAGE_VIEWER_HOME, 'codex_desktop_group') && localSessions.desktop
     ? buildCodexSnapshot(localSessions.desktop, 'desktop')
     : null
-  const bridge = require('../../scripts/codex-desktop-usage.cjs').readFreshBridge(USAGE_VIEWER_HOME)
+  const bridge = enabled(USAGE_VIEWER_HOME, 'codex_desktop_group') && require('../../scripts/codex-desktop-usage.cjs').readFreshBridge(USAGE_VIEWER_HOME)
   const desktop = bridge ? { ...sessionDesktop, ...bridge, token_observed_at: sessionDesktop?.observed_at || null } : sessionDesktop
-  const cli = localSessions.cli
+  const cli = enabled(USAGE_VIEWER_HOME, 'codex_cli_group') && localSessions.cli
     ? buildCodexSnapshot(localSessions.cli, 'cli')
     : null
   const remoteSession = Object.values(remoteSessions)
@@ -67,6 +72,8 @@ function readCodexUsageByMode() {
   const available = [desktop, cli].filter(Boolean)
 
   if (available.length === 0) {
+    if (!enabled(USAGE_VIEWER_HOME, 'codex_desktop_group') && !enabled(USAGE_VIEWER_HOME, 'codex_cli_group'))
+      return { selected: null, desktop, cli, remote, remotes }
     throw new Error(`No direct Codex rate-limit usage found in ${SESSIONS_DIRECTORY}`)
   }
 
@@ -89,7 +96,8 @@ function readConfiguredRemoteSnapshots() {
     return []
   }
 
-  return sources.map((_, index) => {
+  return sources.map((source, index) => {
+    if (String(source.group || '1').trim().toLowerCase() === 'hidden') return null
     const sessions = findLatestUsageSessionsByMode(
       path.join(REMOTE_CACHE_DIRECTORY, String(index), 'sessions')
     )

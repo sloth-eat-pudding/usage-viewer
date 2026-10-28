@@ -17,6 +17,7 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="..\..\scripts\usage-source-policy.ps1" LogicalName="UsageViewer.UsageSourcePolicy.ps1" />
     <PackageReference Include="System.Text.Json" Version="10.0.14" />
   </ItemGroup>
   <ItemGroup>

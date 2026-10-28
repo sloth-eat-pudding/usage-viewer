@@ -22,12 +22,14 @@ async function run() {
   let nextTimer = 0
   let apiStatus = 404
   let block = null
+  let usageEnabled = true
   const context = vm.createContext({
     window: {}, AbortController, console: { warn() {} },
     setInterval(fn) { intervals.push(fn); return intervals.length }, clearInterval() {},
     setTimeout(fn) { const id = ++nextTimer; timers.set(id, fn); return id },
     clearTimeout(id) { timers.delete(id) },
     async fetch(url, options) {
+      if (url.includes('/usage-enabled?')) return { ok: true, json: async () => ({ enabled: usageEnabled }) }
       calls.push({ url, options })
       if (url.startsWith('/api/')) {
         if (block) await new Promise((resolve, reject) => {
@@ -47,6 +49,11 @@ async function run() {
   assert.equal(calls.length, 3)
   assert.equal(calls[2].options.method, 'POST')
   assert.equal(calls[0].options.credentials, 'include')
+  usageEnabled = false
+  const hiddenCalls = calls.length
+  await intervals[0]()
+  assert.equal(calls.length, hiddenCalls, 'Hidden sources must not request or post quota')
+  usageEnabled = true
   block = {}
   const pending = intervals[0]()
   const before = calls.length
@@ -110,6 +117,12 @@ async function testHttpBridge() {
     assert.equal(absent.body.complete, false)
     assert.equal(absent.body.agents.length, 0)
     const org = '11111111-1111-1111-1111-111111111111'
+    const policyFile = path.join(path.dirname(process.argv[2]), 'display-settings.json')
+    fs.writeFileSync(policyFile, JSON.stringify({ claude_desktop_group: 'Hidden' }))
+    assert.equal((await request(`/usage-enabled?org=${org}`, null, 'https://claude.ai', true)).body.enabled, false)
+    assert.equal(await request(`/usage-enabled?org=${org}`, null, 'https://evil.example'), 403)
+    fs.writeFileSync(policyFile, JSON.stringify({ claude_desktop_group: '1' }))
+    assert.equal((await request(`/usage-enabled?org=${org}`, null, 'https://claude.ai', true)).body.enabled, true)
     const refreshId = '22222222-2222-2222-2222-222222222222'
     const endpoint = `/claude-desktop-usage?org=${org}&refresh_id=${refreshId}`
     assert.equal(await request(endpoint, { five_hour: { utilization: 0 } }), 204)

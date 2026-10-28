@@ -3,6 +3,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const { enabled } = require('./usage-source-policy')
 
 const CLAUDE_HOME = process.env.CLAUDE_HOME ||
   path.join(os.homedir(), '.claude')
@@ -67,14 +68,17 @@ function readProfileMappings() {
 }
 
 try {
-  const snapshot = readClaudeDesktopUsage(PLAN_USAGE_HISTORY_FILE)
+  const activeFiles = PLAN_USAGE_HISTORY_FILES.map((file, index) => ({ file, index }))
+    .filter(source => enabled(USAGE_VIEWER_HOME, 'claude_desktop_group', source.file))
+  if (!activeFiles.length && !enabled(USAGE_VIEWER_HOME, 'claude_desktop_group', PLAN_USAGE_HISTORY_FILE)) process.exit(0)
+  const snapshot = readClaudeDesktopUsage(activeFiles[0]?.file || PLAN_USAGE_HISTORY_FILE)
   fs.mkdirSync(USAGE_VIEWER_HOME, { recursive: true })
   writeJsonAtomic(CLAUDE_DESKTOP_LATEST_FILE, snapshot)
   writeJsonAtomic(CLAUDE_LATEST_FILE, snapshot)
   writeJsonAtomic(LATEST_FILE, snapshot)
   fs.appendFileSync(HISTORY_FILE, `${JSON.stringify(snapshot)}\n`, 'utf8')
-  for (let index = 0; index < PLAN_USAGE_HISTORY_FILES.length; index += 1) {
-    writeJsonAtomic(path.join(USAGE_VIEWER_HOME, `claude-desktop-${index}-latest.json`), readClaudeDesktopUsage(PLAN_USAGE_HISTORY_FILES[index]))
+  for (const { file, index } of activeFiles) {
+    writeJsonAtomic(path.join(USAGE_VIEWER_HOME, `claude-desktop-${index}-latest.json`), readClaudeDesktopUsage(file))
   }
   process.stdout.write(formatSummary(snapshot))
 } catch (error) {

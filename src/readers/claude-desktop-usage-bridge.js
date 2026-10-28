@@ -9,6 +9,7 @@ const os = require('os')
 const path = require('path')
 const { normalizeUsage } = require('./claude-usage-contract')
 const { readSubagentUsage } = require('./claude-subagent-usage')
+const { organizationEnabled } = require('./usage-source-policy')
 
 const USAGE_VIEWER_HOME = process.env.USAGE_VIEWER_HOME ||
   path.join(os.homedir(), '.usage-viewer')
@@ -33,6 +34,13 @@ http.createServer((request, response) => {
 
   if (request.method === 'GET' && requestUrl.pathname === '/health') {
     return respond(response, 200, { status: 'ok' })
+  }
+
+  if (request.method === 'GET' && requestUrl.pathname === '/usage-enabled') {
+    if (!ALLOWED_ORIGINS.has(origin)) return respond(response, 403)
+    const organization = requestUrl.searchParams.get('org') || ''
+    if (!ORGANIZATION_ID_PATTERN.test(organization)) return respond(response, 400)
+    return respond(response, 200, { enabled: organizationEnabled(USAGE_VIEWER_HOME, organization) }, origin)
   }
 
   if (request.method === 'GET' && requestUrl.pathname === '/claude-subagent-usage') {

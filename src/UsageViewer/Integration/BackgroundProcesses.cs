@@ -26,6 +26,7 @@ internal sealed class BackgroundProcesses : IDisposable
             Directory.CreateDirectory(directory);
             foreach (var (resourceName, filename) in new[] {
                 ("UsageViewer.WatchCodexDesktopUsage.ps1", "watch-codex-desktop-usage.ps1"),
+                ("UsageViewer.UsageSourcePolicy.ps1", "usage-source-policy.ps1"),
                 ("UsageViewer.CodexDesktopUsage.cjs", "codex-desktop-usage.cjs"),
                 ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
                 ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs") })
@@ -56,6 +57,9 @@ internal sealed class BackgroundProcesses : IDisposable
             Directory.CreateDirectory(_home);
             if (!File.Exists(path) || File.ReadAllText(path) != script) File.WriteAllText(path, script, new UTF8Encoding(false));
             using var profilesResource = typeof(UsageReaderService).Assembly.GetManifestResourceStream("UsageViewer.ClaudeDesktopProfiles.ps1");
+            using (var policyResource = typeof(UsageReaderService).Assembly.GetManifestResourceStream("UsageViewer.UsageSourcePolicy.ps1"))
+            using (var policyReader = new StreamReader(policyResource ?? throw new InvalidDataException("Usage source policy is missing")))
+                File.WriteAllText(Path.Combine(_home, "usage-source-policy.ps1"), policyReader.ReadToEnd(), new UTF8Encoding(false));
             if (profilesResource is null) throw new InvalidDataException("Claude profile discovery script is missing");
             using (var profilesReader = new StreamReader(profilesResource, Encoding.UTF8))
             {

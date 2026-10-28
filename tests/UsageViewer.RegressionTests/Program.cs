@@ -3,6 +3,7 @@ using UsageViewer;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("Hidden sources stop polling and resume when shown", HiddenSources),
     ("Claude packaged profile migration and legacy discovery", ClaudeProfiles),
     ("Claude subagent linkage, metadata minimization and missing data", ClaudeSubagents),
     ("Shared Claude API contract", ContractFixtures),
@@ -26,6 +27,28 @@ foreach (var test in tests)
 }
 Console.WriteLine($"{tests.Length - failed}/{tests.Length} regression groups passed.");
 return failed == 0 ? 0 : 1;
+
+static void HiddenSources()
+{
+    using var workspace = new Workspace();
+    var home = workspace.Root;
+    var store = new SnapshotStore(home);
+    var history = Path.Combine(home, "history.json");
+    File.WriteAllText(history, "{\"samples\":[{\"t\":1000,\"org\":\"test-org\"}]}");
+    store.Write("display-settings.json", new { codex_desktop_group = "Hidden", codex_cli_group = "Hidden", claude_cli_group = "Hidden",
+        claude_desktop_group = "1", claude_desktop_sources = new[] { new { path = history, group = "Hidden" } } });
+    Equal(false, UsageSourcePolicy.Enabled(home, "claude_desktop_group", history), "Per-profile Hidden overrides shared group");
+    Equal(false, UsageSourcePolicy.OrganizationEnabled(home, "test-org"), "Hidden organization cannot request quota");
+    store.Write("codex-desktop-bridge-latest.json", new { source = "codex-desktop-bridge", profile_id = "default", observed_at = DateTimeOffset.UtcNow.ToString("O") });
+    using (var reader = new CodexUsageReader(store, Path.Combine(home, "sessions"))) reader.Refresh();
+    Equal(false, File.Exists(Path.Combine(home, "codex-desktop-latest.json")), "Hidden Desktop must not refresh its snapshot");
+    using (var reader = new ClaudeUsageReader(store, new[] { history })) reader.Refresh();
+    Equal(false, File.Exists(Path.Combine(home, "claude-desktop-0-latest.json")), "Hidden Claude profile must not refresh");
+    store.Write("display-settings.json", new { codex_desktop_group = "1", claude_desktop_sources = new[] { new { path = history, group = "2" } } });
+    Equal(true, UsageSourcePolicy.OrganizationEnabled(home, "test-org"), "Shown organization resumes");
+    using (var reader = new CodexUsageReader(store, Path.Combine(home, "sessions"))) reader.Refresh();
+    Equal(true, File.Exists(Path.Combine(home, "codex-desktop-latest.json")), "Shown Desktop resumes refresh");
+}
 
 static void ArgumentQuoting()
 {

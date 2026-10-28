@@ -37,7 +37,7 @@ exe 與腳本版共用相同的讀取來源與顯示規則：沒有偵測到 Cla
 Claude 來源包括 Desktop、CLI 與可選的自訂 `plan-usage-history.json`；Codex 來源包括 Desktop、CLI 與遠端 SSH。每一個來源都可在 Settings 中設定為：
 
 - `Group 1`、`Group 2` 或 `Group 3`：同一產品中相同群組的來源會合併成一行，並採用該群組最新的 snapshot。
-- `Hidden`：不顯示該來源。
+- `Hidden`：不顯示該來源，也停止取得該來源的使用量；改回群組後會在下一次輪詢恢復取得。
 
 因此可表達 D+C、D+SSH、C+SSH、全部合併或全部分開。設定保存在 `%USERPROFILE%\.usage-viewer\display-settings.json`，兩種模式都會套用。自訂 Claude history 的路徑也會寫入 `%USERPROFILE%\.usage-viewer\claude-custom-source.json`，供 WPF reader 產生 `claude-custom-latest.json`。
 

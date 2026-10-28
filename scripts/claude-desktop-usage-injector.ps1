@@ -8,6 +8,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-desktop-profiles.ps1')
+. (Join-Path $PSScriptRoot 'usage-source-policy.ps1')
 
 if ($env:CLAUDE_DESKTOP_AUTO_BRIDGE -eq '0') { exit 0 }
 
@@ -365,6 +366,7 @@ if (-not $developerModeEnabled) {
 }
 
 function Get-ClaudeTargets {
+  param([switch]$IncludeHidden)
   $defaultProfiles = @(Get-ClaudeDesktopProfiles)
   $files = @($defaultProfiles | ForEach-Object { $_.path })
   $customSources = @()
@@ -383,6 +385,9 @@ function Get-ClaudeTargets {
     }
   $targets = @()
   foreach ($file in $files) {
+    $groupKey = if (@($defaultProfiles | Where-Object { $_.path -ieq $file }).Count) { 'claude_desktop_group' } else { 'claude_custom_group' }
+    $enabled = Test-UsageSourceEnabled $usageHome $groupKey $file
+    if (-not $enabled -and -not $IncludeHidden) { continue }
     try {
       $history = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
       # A history file can contain samples from organizations that are no
@@ -402,6 +407,7 @@ function Get-ClaudeTargets {
         if ($configuredSource.Count -gt 0) { $profile = [string]$configuredSource[0].profile_path }
         $targets += [pscustomobject]@{
           Organization = $organization
+          Enabled = $enabled
           Profile = $profile
           IsDefault = @($defaultProfiles | Where-Object { $_.path -ieq $file }).Count -gt 0
         }
@@ -516,6 +522,8 @@ function New-InjectionScript {
         const controller=new AbortController();
         const timeout=setTimeout(()=>controller.abort(),10000);
         try{
+          const gate=await fetch('http://127.0.0.1:8765/usage-enabled?org='+encodeURIComponent(g),{cache:'no-store',signal:controller.signal});
+          if(!gate.ok || !(await gate.json()).enabled)continue;
           const r=await fetch('/api/organizations/'+g+'/usage?usage_viewer_refresh='+Date.now(),{
             credentials:'include',cache:'no-store',signal:controller.signal
           });
@@ -684,7 +692,7 @@ function Start-ConfiguredClaudeProfiles {
   try {
     $settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
     $sources = if ($null -ne $settings.sources) { @($settings.sources) } else { @($settings) }
-    $profiles = @($sources | ForEach-Object {
+    $profiles = @($sources | Where-Object { Test-UsageSourceEnabled $usageHome 'claude_custom_group' ([string]$_.path) } | ForEach-Object {
       if ($_.profile_path) { [string]$_.profile_path }
     } | Where-Object { Test-Path -LiteralPath (Join-Path $_ 'plan-usage-history.json') } | Sort-Object -Unique)
     if ($profiles.Count -eq 0) { return }
@@ -705,7 +713,7 @@ function Start-ConfiguredClaudeProfiles {
       ($_.CommandLine -notmatch '--user-data-dir' -or
        $_.CommandLine.IndexOf((Join-Path $env:APPDATA 'Claude'), [StringComparison]::OrdinalIgnoreCase) -ge 0)
     }).Count -gt 0
-    if (-not $defaultRunning) {
+    if (-not $defaultRunning -and (Test-UsageSourceEnabled $usageHome 'claude_desktop_group')) {
       $app = Get-StartApps -ErrorAction Stop | Where-Object { $_.Name -eq 'Claude' } | Select-Object -First 1
       if ($app) {
         Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$($app.AppID)" -WindowStyle Hidden -ErrorAction Stop
@@ -762,7 +770,7 @@ function Get-ClaudeRetryState {
 }
 
 function Invoke-BoundedInjection {
-  param([object]$Window, [string]$Organization = '', [switch]$MeterOnly)
+  param([object]$Window, [string]$Organization = '', [switch]$MeterOnly, [switch]$SkipObservation)
   $startedAt = [DateTimeOffset]::UtcNow
   $refreshId = [guid]::NewGuid().ToString()
   $existingTools = @([ClaudeUsageInjectorNative]::FindClaudeWindows($true) | ForEach-Object { $_.Handle })
@@ -792,6 +800,7 @@ function Invoke-BoundedInjection {
       Write-InjectorLog "worker failed organization=$Organization exit=$($worker.ExitCode); see claude-desktop-usage-worker.stderr.log"
       return $false
     }
+    if ($SkipObservation) { return $true }
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds(15)
     do {
       if ($MeterOnly) {
@@ -821,6 +830,7 @@ function Invoke-BoundedInjection {
 Write-InjectorLog 'supervisor started'
 $states = @{}
 $meterStates = @{}
+$visibilityUpdated = @{}
 $nextWindowCheck = [DateTimeOffset]::MinValue
 $nextProfileCheck = [DateTimeOffset]::MinValue
 $nextBridgeLog = [DateTimeOffset]::MinValue
@@ -836,6 +846,16 @@ try {
         $nextWindowCheck = [DateTimeOffset]::UtcNow.AddSeconds(5)
         $meterProcesses = @(Get-CimInstance Win32_Process -Filter "Name = 'Claude.exe'" -ErrorAction Stop)
         $meterWindows = @(Get-SessionMeterWindows $meterProcesses @([ClaudeUsageInjectorNative]::FindClaudeWindows($false)))
+        # Replace timers installed by older versions even if their source is
+        # already hidden. The new timer checks visibility before any quota call.
+        foreach ($hiddenTarget in @(Get-ClaudeTargets -IncludeHidden | Where-Object { -not $_.Enabled })) {
+          if ($null -eq (Read-BridgeObservation $hiddenTarget.Organization)) { continue }
+          $hiddenWindow = Get-TargetWindow $hiddenTarget $meterProcesses $meterWindows
+          if ($null -eq $hiddenWindow) { continue }
+          $hiddenKey = "$($hiddenWindow.ProcessId)-$($hiddenWindow.Handle)|$($hiddenTarget.Organization)"
+          if ($visibilityUpdated.ContainsKey($hiddenKey) -or [ClaudeUsageInjectorNative]::IdleMilliseconds() -lt 2500) { continue }
+          if (Invoke-BoundedInjection $hiddenWindow $hiddenTarget.Organization -SkipObservation) { $visibilityUpdated[$hiddenKey] = $true }
+        }
         $activeInstances = @($meterWindows | ForEach-Object { "$($_.ProcessId)-$($_.Handle)" })
         foreach ($instance in @($meterStates.Keys)) { if ($activeInstances -notcontains $instance) { $meterStates.Remove($instance) } }
         $meterAttempted = $false

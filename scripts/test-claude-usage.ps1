@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-desktop-profiles.ps1')
+. (Join-Path $PSScriptRoot 'usage-source-policy.ps1')
 $scriptPath = Join-Path $PSScriptRoot 'claude-desktop-usage-injector.ps1'
 $tokens = $null
 $parseErrors = $null
