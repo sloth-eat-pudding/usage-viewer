@@ -129,6 +129,7 @@ public static class ClaudeUsageInjectorNative
     [DllImport("user32.dll")] private static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
     [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int command);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint attach, uint attachTo, bool value);
     [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
@@ -180,7 +181,9 @@ public static class ClaudeUsageInjectorNative
         var attached = foregroundThread != 0 && foregroundThread != currentThread && AttachThreadInput(currentThread, foregroundThread, true);
         try
         {
-            ShowWindow(window, 9);
+            // Restore only minimized windows; leave maximized and snapped
+            // windows in their existing placement when bringing them forward.
+            if (IsIconic(window)) ShowWindow(window, 9);
             BringWindowToTop(window);
             SetForegroundWindow(window);
             if (GetForegroundWindow() != window) SwitchToThisWindow(window, true);

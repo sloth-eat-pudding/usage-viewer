@@ -14,7 +14,7 @@
 
 1. 使用 Win32 `EnumWindows` 找到 Claude 視窗，以 `GetWindowThreadProcessId` 確認所屬程序。一般模式等到使用者至少 2.5 秒沒有鍵盤或滑鼠輸入再開始。
 2. 先確認 `http://127.0.0.1:8765/health` 正常，再啟動獨立的 PowerShell worker。主管程序保存已有的 DevTools handle，供逾時清理時辨識。
-3. worker 使用 `ShowWindow(..., 9)` 還原 Claude 視窗，再用 `BringWindowToTop`、`SetForegroundWindow` 等 Win32 呼叫切換焦點。
+3. worker 只有在視窗最小化時才使用 `ShowWindow(..., 9)` 還原，再用 `BringWindowToTop`、`SetForegroundWindow` 等 Win32 呼叫切換焦點；已顯示的 Claude 與 DevTools 視窗不會因聚焦而被還原，保留原本的位置、大小與最大化／貼齊狀態。
 4. 優先尋找同一個 Claude process 的 `https://claude.ai` DevTools；`CLAUDE_DEV_TOOLS=undocked` 在 Claude 重啟時自動開啟的視窗可以重用，不會因為它已存在就永久跳過更新。無既有工具時才送出 `Ctrl+Alt+I` 並等最多 5 秒。包裝頁面、其他帳號或其他虛擬桌面的工具不會收到輸入；多個工具或同一程序有多個主視窗而無法唯一配對時延後操作。
 5. 聚焦 DevTools，送出 `Ctrl+Shift+J` 選取 Console panel，再透過 Windows UI Automation 找到可見且可編輯的 `Console prompt`。只有能讀到空白輸入欄時才繼續；無法讀取、尚未完成載入或有使用者草稿時不貼上內容。
 6. 將完整 JavaScript 放入剪貼簿，送出 `Ctrl+V` 一次貼上。CodeMirror 只透過 UI Automation 回報畫面內的行，因此貼上後先放入一次性的剪貼簿探針，再複製 Console 的完整輸入核對；只有與完整腳本相同、焦點仍在該 DevTools 時才按 Enter。若複製失敗、貼上保護擋住脚本，或貼到錯誤欄位，不會執行。已有 Developer Mode 與允許貼上的 Claude console 可直接執行；不會自動繞過貼上保護。
