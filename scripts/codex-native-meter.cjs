@@ -38,6 +38,7 @@ function options(argv) {
     else if (arg === '--screenshot') result.screenshot = path.resolve(argv[++i])
     else if (arg === '--watch') result.mode = 'watch'
     else if (arg === '--remove') result.mode = 'remove'
+    else if (arg === '--close') result.mode = 'close'
     else if (arg === '--reinstall') result.reinstall = true
     else if (arg === '--codex-home') result.codexHome = path.resolve(argv[++i])
     else if (arg === '--usage-home') result.usageHome = path.resolve(argv[++i])
@@ -106,6 +107,15 @@ async function run(config) {
   const version = await json(`${origin}/json/version`)
   const browser = debuggerUrl(version.webSocketDebuggerUrl, config.port, 'browser')
   if (browser.pathname !== `/devtools/browser/${config.browserId}`) throw new Error('Browser identity changed; refusing injection')
+  if (config.mode === 'close') {
+    const client = await connect(browser.href)
+    try {
+      await client.send('Browser.close').catch(error => {
+        if (error.message !== 'CDP disconnected') throw error
+      })
+    } finally { client.close() }
+    return { closing: true }
+  }
   const targets = (await json(`${origin}/json/list`)).filter(target => {
     if (target.type !== 'page') return false
     try { const url = new URL(target.url); return url.protocol === 'app:' && url.host === '-' && url.pathname === '/index.html' } catch { return false }

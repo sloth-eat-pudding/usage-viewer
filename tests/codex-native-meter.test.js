@@ -39,6 +39,39 @@ test('native experiment requires an explicit browser identity and bounded port',
   assert.throws(() => options(['--browser-id', '../foreign']))
   assert.throws(() => options(['--browser-id', identity, '--typo']))
   assert.equal(options(['--browser-id', identity, '--remove']).mode, 'remove')
+  assert.equal(options(['--browser-id', identity, '--close']).mode, 'close')
+})
+
+test('account recovery closes only the verified browser and propagates close failures', async t => {
+  const { run } = require('../scripts/codex-native-meter.cjs')
+  const sent = []
+  let reportedIdentity = identity
+  let closeError = false
+  t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => ({
+    webSocketDebuggerUrl: `ws://127.0.0.1:19336/devtools/browser/${reportedIdentity}`
+  }) }))
+  t.mock.property(globalThis, 'WebSocket', class {
+    constructor(url) {
+      assert.equal(url, `ws://127.0.0.1:19336/devtools/browser/${identity}`)
+      queueMicrotask(() => this.onopen())
+    }
+    send(raw) {
+      const message = JSON.parse(raw)
+      sent.push(message.method)
+      queueMicrotask(() => this.onmessage({ data: JSON.stringify({ id: message.id,
+        ...(closeError ? { error: { message: 'Close refused' } } : { result: {} }) }) }))
+    }
+    close() { this.onclose?.() }
+  })
+  const config = { port: 19336, browserId: identity, mode: 'close' }
+  assert.deepEqual(await run(config), { closing: true })
+  assert.deepEqual(sent, ['Browser.close'])
+  reportedIdentity = 'aaaaaaaa-2222-3333-4444-555555555555'
+  await assert.rejects(run(config), /Browser identity changed/)
+  assert.deepEqual(sent, ['Browser.close'], 'A different browser must never receive a close request')
+  reportedIdentity = identity
+  closeError = true
+  await assert.rejects(run(config), /Close refused/)
 })
 test('CDP destinations cannot escape the exact loopback port and target kind', () => {
   for (const url of [
