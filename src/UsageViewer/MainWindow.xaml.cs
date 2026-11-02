@@ -469,7 +469,7 @@ public partial class MainWindow : Window
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
-        var settings = SettingsDialog.Show(this, _settingsOnly, _displaySettings, ClaudeDesktopSources());
+        var settings = SettingsDialog.Show(_displaySettings, ClaudeDesktopSources());
         if (settings is null) return;
         _displaySettings = settings;
         SaveDisplaySettings();

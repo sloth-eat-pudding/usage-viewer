@@ -1165,11 +1165,11 @@ function Show-DisplaySettings {
   $dialog = New-Object System.Windows.Forms.Form
   $dialog.Text = "Usage Viewer Settings"
   $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
-  $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
-  $dialog.MaximizeBox = $false
-  $dialog.MinimizeBox = $false
-  $dialog.ShowInTaskbar = $false
-  $dialog.TopMost = $true
+  $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::Sizable
+  $dialog.MaximizeBox = $true
+  $dialog.MinimizeBox = $true
+  $dialog.ShowInTaskbar = $true
+  $dialog.TopMost = $false
   $dialog.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
   $dialog.ForeColor = [System.Drawing.Color]::White
   $dialog.Opacity = 0.96

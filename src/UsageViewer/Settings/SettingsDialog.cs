@@ -12,15 +12,17 @@ namespace UsageViewer;
 
 internal static class SettingsDialog
 {
-    internal static DisplaySettings? Show(Window owner, bool settingsOnly, DisplaySettings settings, IReadOnlyList<ConfiguredSource> detectedDesktop)
+    internal static DisplaySettings? Show(DisplaySettings settings, IReadOnlyList<ConfiguredSource> detectedDesktop)
     {
         DisplaySettings? result = null;
+        // Keep settings independent of the topmost overlay so Windows can switch
+        // and minimize it normally without inheriting the overlay's z-order.
         var dialog = new Window
         {
-            Title = "Usage Viewer Settings", Owner = owner, WindowStartupLocation = settingsOnly ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
+            Title = "Usage Viewer Settings", WindowStartupLocation = WindowStartupLocation.CenterScreen,
             Width = 720, Height = 650, MinWidth = 680, MinHeight = 500, ResizeMode = ResizeMode.CanResize,
-            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(23, 23, 23)), WindowStyle = WindowStyle.None, AllowsTransparency = false,
-            Topmost = true, ShowInTaskbar = false
+            Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(23, 23, 23)), WindowStyle = WindowStyle.SingleBorderWindow, AllowsTransparency = false,
+            Topmost = false, ShowInTaskbar = true
         };
         var outer = new Border { Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(23, 23, 23)), BorderBrush = System.Windows.Media.Brushes.DimGray, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Padding = new Thickness(14) };
         var root = new Grid(); root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); root.RowDefinitions.Add(new RowDefinition()); root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); outer.Child = root; dialog.Content = outer;
@@ -224,7 +226,7 @@ internal static class SettingsDialog
         var prompt = new Window
         {
             Title = "Add Claude environment", Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-            Width = 380, Height = 170, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Topmost = true,
+            Width = 380, Height = 170, ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Topmost = false,
             Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(28, 28, 28))
         };
         var root = new StackPanel { Margin = new Thickness(16) };
