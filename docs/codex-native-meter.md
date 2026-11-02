@@ -16,11 +16,11 @@
 
 **Settings → Codex account windows → Open** 開啟的已註冊帳號視窗也會自動啟用全寬與標籤，watcher 明確指定該資料夾的 `codex` home。新資料夾在登入並產生本機用量紀錄前顯示未知。這不代表完整多帳號憑證隔離已驗證，詳見 [資料夾啟動](codex-account-profile.md)。
 
-在專案根目錄雙擊 `Start-Codex-Session-Meter.cmd`。需要 Node.js 22+ 與目前 Windows 使用者已註冊的官方 Store Codex。啟動器自動找到最新安裝位置、使用 `.tools/codex-native-test-profile` 啟動或重用視窗、驗證 loopback 埠的程序與 profile 身份、取得當次 browser ID，再啟動 reader 與背景 watcher。重複啟動會替換同一個已驗證實例的 watcher，不強制關閉 Codex。按過 × 後再次雙擊啟動入口會重新啟用元件與全寬。
+在專案根目錄雙擊 `Start-Codex-Session-Meter.cmd`。需要 Node.js 22+ 與目前 Windows 使用者已註冊的官方 Store Codex。啟動器自動找到最新安裝位置、不指定 `--user-data-dir`，直接啟動或重用原本的 Codex Desktop 視窗、驗證 loopback 埠的程序身份、取得當次 browser ID，再啟動 reader 與背景 watcher。重複啟動會替換同一個已驗證實例的 watcher，不強制關閉 Codex。按過 × 後再次雙擊啟動入口會重新啟用元件與全寬。
 
-平常從官方 Codex 捷徑開啟的視窗不會自動附加元件。測試實例完整結束後，watcher 遇到斷線會退出；下次仍用上述入口啟動。執行紀錄與當次程序身份保存在 `.tools/codex-native-meter-*`，不提交版本控制。若第一次啟動失敗，錯誤會停留在命令視窗，不會關閉正常 Codex 或接管身份不明的埠。
+首次套用到原本視窗時，若 Codex 已經從官方捷徑啟動且沒有本機除錯埠，請先完整退出原本的 Codex（包含系統匣背景程序），再使用上述入口，或 Settings → Codex account windows 選原本帳號按 Open。啟動器會提示需要重新開啟，不會強制關閉正在使用的 Codex。之後用此入口啟動即可保留原本 Desktop 設定並套用與 Self 相同的全寬。Codex 完整結束後，watcher 遇到斷線會退出；下次仍用上述入口啟動。執行紀錄與當次程序身份保存在 `.tools/codex-native-meter-*`，不提交版本控制。
 
-這個入口沿用目前帳號的 Codex home／後端。開不同聊天、分頁或此測試視窗，**不等於不同帳號**。獨立 `--user-data-dir` 只隔開桌面瀏覽資料；不能視為帳號隔離。
+這個入口沿用目前帳號的 Codex home／後端。開不同聊天或分頁，**不等於不同帳號**。舊版入口另建測試 Desktop 資料夾；新版原本帳號入口直接沿用官方預設 Desktop 資料，不再另開測試 profile。
 
 同時使用不同帳號需另行驗證獨立的桌面 profile、`CODEX_HOME`／憑證儲存、CDP 埠與 reader snapshot 目錄。官方 [環境變數](https://learn.chatgpt.com/docs/config-file/environment-variables)列出 `CODEX_HOME` 涵蓋 config、auth、logs 與 sessions；[登入文件](https://learn.chatgpt.com/docs/auth)也說明憑證可能存在 auth.json 或系統憑證存放區。不能只換頁面或只換 UI profile 就承諾帳號完全分開。本版本尚未實測多帳號，請勿用它進行帳號隔離或在共用實例登出另一帳號。
 

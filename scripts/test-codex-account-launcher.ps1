@@ -71,3 +71,52 @@ foreach ($case in @('visible', 'current', 'other-profile', 'unsigned')) {
   if (!$rejected -or $script:killed) { throw "Unsafe retirement accepted: $case" }
 }
 Write-Output 'Codex account launcher checks passed: exact profile identity, previous official version, signature rejection and occupied port recovery.'
+
+$nativeAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'start-codex-native-meter.ps1'), [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+$originalDefinition = $nativeAst.Find({ param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-OriginalCodexProcess'
+}, $true)
+. ([scriptblock]::Create($originalDefinition.Extent.Text))
+foreach ($command in @('"C:\App\ChatGPT.exe"', 'ChatGPT.exe --remote-debugging-port=19335')) {
+  if (!(Test-OriginalCodexProcess ([pscustomobject]@{ CommandLine = $command }))) { throw 'Original desktop was not recognized.' }
+}
+foreach ($command in @('ChatGPT.exe --type=renderer', 'ChatGPT.exe "--user-data-dir=C:\Profiles\self\desktop"',
+    'ChatGPT.exe --user-data-dir="C:\Profiles\self\desktop"', 'ChatGPT.exe --user-data-dir=C:\Profiles\self\desktop')) {
+  if (Test-OriginalCodexProcess ([pscustomobject]@{ CommandLine = $command })) { throw 'A child or separate profile was mistaken for the original desktop.' }
+}
+if (Test-OriginalCodexProcess $null) { throw 'Missing original process accepted.' }
+Write-Output 'Original Codex layout launcher identity checks passed.'
+
+$discoveryAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'watch-codex-desktop-usage.ps1'), [ref]$tokens, [ref]$errors)
+if ($errors.Count) { throw ($errors | Out-String) }
+$discoveryDefinition = $discoveryAst.Find({ param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DesktopSources'
+}, $true)
+. ([scriptblock]::Create($discoveryDefinition.Extent.Text))
+$usageHome = 'C:\Usage'
+$script:discoveryProcesses = @(
+  [pscustomobject]@{ ProcessId = 101; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19335' },
+  [pscustomobject]@{ ProcessId = 102; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19336 "--user-data-dir=C:\Profiles\self\desktop"' },
+  [pscustomobject]@{ ProcessId = 103; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19337 "--user-data-dir=C:\Usage\.tools\codex-native-test-profile"' }
+)
+function Get-AppxPackage { return [pscustomobject]@{ InstallLocation = $package.InstallLocation; SignatureKind = 'Store'; IsDevelopmentMode = $false } }
+function Get-CimInstance { return $script:discoveryProcesses }
+function Get-Content { return '{"profiles":[{"id":"self","name":"Self","profile_root":"C:\\Profiles\\self"}]}' }
+function netstat.exe {
+  return @('  TCP  127.0.0.1:19335  0.0.0.0:0  LISTENING  101',
+    '  TCP  127.0.0.1:19336  0.0.0.0:0  LISTENING  102',
+    '  TCP  127.0.0.1:19337  0.0.0.0:0  LISTENING  103')
+}
+function Test-UsageSourceEnabled { return $true }
+function Invoke-RestMethod { param($Uri)
+  $port = ([Uri]$Uri).Port
+  return @{ webSocketDebuggerUrl = "ws://127.0.0.1:$port/devtools/browser/11111111-2222-3333-4444-555555555555" }
+}
+$sources = @(Get-DesktopSources)
+if ($sources.Count -ne 2) { throw 'Expected the original and Self sources, excluding the legacy test desktop.' }
+$original = @($sources | Where-Object { $_.id -eq 'default' })
+$self = @($sources | Where-Object { $_.id -eq 'self' })
+if ($original.Count -ne 1 -or $original[0].port -ne 19335 -or $original[0].output -ne $usageHome) { throw 'Original desktop quota was not paired with the shared usage home.' }
+if ($self.Count -ne 1 -or $self[0].port -ne 19336 -or $self[0].output -ne 'C:\Profiles\self\usage') { throw 'Self desktop quota lost its profile isolation.' }
+Write-Output 'Original and Self desktop discovery checks passed.'

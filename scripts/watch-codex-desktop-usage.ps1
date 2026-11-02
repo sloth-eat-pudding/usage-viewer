@@ -23,16 +23,17 @@ function Get-DesktopSources {
     if ($port -lt 1024 -or $port -gt 65535) { continue }
     $bound = @($listeners | Select-String "^\s*TCP\s+(\S+):$port\s+\S+\s+LISTENING\s+(\d+)\s*$")
     if ($bound.Count -ne 1 -or $bound[0].Matches[0].Groups[1].Value -ne '127.0.0.1' -or [int]$bound[0].Matches[0].Groups[2].Value -ne $process.ProcessId) { continue }
-    if ($command -notmatch '(?:"--user-data-dir=([^"]+)"|--user-data-dir="([^"]+)"|--user-data-dir=([^\s"]+))') { continue }
-    $desktopPath = @($Matches[1], $Matches[2], $Matches[3] | Where-Object { $_ })[0]
-    $desktopPath = [IO.Path]::GetFullPath($desktopPath).TrimEnd('\')
+    $desktopPath = $null
+    if ($command -match '(?:"--user-data-dir=([^"]+)"|--user-data-dir="([^"]+)"|--user-data-dir=([^\s"]+))') {
+      $desktopPath = @($Matches[1], $Matches[2], $Matches[3] | Where-Object { $_ })[0]
+      $desktopPath = [IO.Path]::GetFullPath($desktopPath).TrimEnd('\')
+    }
     $profile = @($profiles | Where-Object { $_.id -ne 'default' -and $_.profile_root -and (Join-Path $_.profile_root 'desktop').TrimEnd('\') -ieq $desktopPath })
     $id = $null; $name = $null; $output = $null
     if ($profile.Count -eq 1 -and $profile[0].id -match '^[a-zA-Z0-9_-]+$') {
       $id = [string]$profile[0].id; $name = [string]$profile[0].name
       $output = Join-Path $profile[0].profile_root 'usage'
-    } elseif ($desktopPath -ieq (Join-Path (Split-Path $PSScriptRoot -Parent) '.tools\codex-native-test-profile') -or
-              $desktopPath -ieq (Join-Path $usageHome '.tools\codex-native-test-profile')) {
+    } elseif (!$desktopPath) {
       $id = 'default'; $name = 'Codex'; $output = $usageHome
     } else {
       # Unregistered test instances are deliberately excluded.
