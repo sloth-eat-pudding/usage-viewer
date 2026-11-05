@@ -24,6 +24,24 @@ New-Item -ItemType Directory -Path $usageHome | Out-Null
 $organization = '11111111-1111-1111-1111-111111111111'
 $path = Join-Path $usageHome "claude-desktop-api-$organization-latest.json"
 try {
+  # Load the watchdog logger without starting services or acquiring its mutex.
+  $watchErrors = $null; $watchTokens = $null
+  $watchAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'watch-claude-desktop-usage-bridge.ps1'), [ref]$watchTokens, [ref]$watchErrors)
+  if ($watchErrors.Count) { throw ($watchErrors | Out-String) }
+  $logger = $watchAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-BridgeWatchLog' }, $false)
+  Invoke-Expression $logger.Extent.Text
+  $usageDirectory = $usageHome
+  $watchLog = Join-Path $usageDirectory 'claude-desktop-usage-bridge-watch.log'
+  Write-BridgeWatchLog 'first entry'
+  Write-BridgeWatchLog 'second entry'
+  Assert-True ((Get-Content $watchLog).Count -eq 2) 'Watchdog logging must append without overwriting earlier entries'
+  $lockedLog = [IO.File]::Open($watchLog, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+  try {
+    Write-BridgeWatchLog 'blocked entry'
+    Write-BridgeWatchLog 'bridge launch failed: test'
+  } finally { $lockedLog.Dispose() }
+  Write-BridgeWatchLog 'recovered entry'
+  Assert-True ((Get-Content $watchLog).Count -eq 3) 'A locked log must not stop recovery, and logging must resume after it is released'
   # Reproduce the packaged app's profile migration, with both locations present.
   $fixtureAppData = Join-Path $usageHome 'roaming'
   $fixtureLocalData = Join-Path $usageHome 'local'

@@ -12,6 +12,18 @@ $usageDirectory = if ($env:USAGE_VIEWER_HOME) { $env:USAGE_VIEWER_HOME } else { 
 $bridgeScript = Join-Path $PSScriptRoot '..\src\readers\claude-desktop-usage-bridge.js'
 $bridgePort = if ($env:CLAUDE_DESKTOP_USAGE_BRIDGE_PORT) { [int]$env:CLAUDE_DESKTOP_USAGE_BRIDGE_PORT } else { 8765 }
 $bridgeProcess = $null
+function Write-BridgeWatchLog {
+  param([string]$Message)
+  $line = "$([DateTimeOffset]::UtcNow.ToString('O')) $Message" + [Environment]::NewLine
+  # Add-Content can fail while seeking a shared log in Windows PowerShell.
+  # Diagnostics must never tear down the bridge or stop its recovery loop.
+  for ($attempt = 0; $attempt -lt 5; $attempt++) {
+    try {
+      [IO.File]::AppendAllText((Join-Path $usageDirectory 'claude-desktop-usage-bridge-watch.log'), $line, [Text.UTF8Encoding]::new($false))
+      return
+    } catch { Start-Sleep -Milliseconds 50 }
+  }
+}
 try {
   New-Item -ItemType Directory -Path $usageDirectory -Force | Out-Null
   while ($true) {
@@ -29,9 +41,9 @@ try {
         $bridgeProcess = Start-Process -FilePath 'node.exe' -ArgumentList "`"$bridgeScript`"" -WindowStyle Hidden -PassThru `
           -RedirectStandardOutput (Join-Path $usageDirectory 'claude-desktop-usage-bridge.stdout.log') `
           -RedirectStandardError (Join-Path $usageDirectory 'claude-desktop-usage-bridge.stderr.log')
-        Add-Content -LiteralPath (Join-Path $usageDirectory 'claude-desktop-usage-bridge-watch.log') -Value "$([DateTimeOffset]::UtcNow.ToString('O')) started bridge process=$($bridgeProcess.Id)"
+        Write-BridgeWatchLog "started bridge process=$($bridgeProcess.Id)"
       } catch {
-        Add-Content -LiteralPath (Join-Path $usageDirectory 'claude-desktop-usage-bridge-watch.log') -Value "$([DateTimeOffset]::UtcNow.ToString('O')) bridge launch failed: $($_.Exception.Message)"
+        Write-BridgeWatchLog "bridge launch failed: $($_.Exception.Message)"
       }
     }
     Start-Sleep -Seconds 15
