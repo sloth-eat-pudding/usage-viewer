@@ -94,13 +94,17 @@ $discoveryDefinition = $discoveryAst.Find({ param($node)
   $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DesktopSources'
 }, $true)
 . ([scriptblock]::Create($discoveryDefinition.Extent.Text))
+$officialDefinition = $discoveryAst.Find({ param($node)
+  $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Test-OfficialDesktopExecutable'
+}, $true)
+. ([scriptblock]::Create($officialDefinition.Extent.Text))
 $usageHome = 'C:\Usage'
 $script:discoveryProcesses = @(
   [pscustomobject]@{ ProcessId = 101; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19335' },
   [pscustomobject]@{ ProcessId = 102; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19336 "--user-data-dir=C:\Profiles\self\desktop"' },
   [pscustomobject]@{ ProcessId = 103; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe --remote-debugging-port=19337 "--user-data-dir=C:\Usage\.tools\codex-native-test-profile"' }
 )
-function Get-AppxPackage { return [pscustomobject]@{ InstallLocation = $package.InstallLocation; SignatureKind = 'Store'; IsDevelopmentMode = $false } }
+function Get-AppxPackage { return [pscustomobject]@{ InstallLocation = $package.InstallLocation; Name = $package.Name; PackageFamilyName = $package.PackageFamilyName; SignatureKind = 'Store'; IsDevelopmentMode = $false } }
 function Get-CimInstance { return $script:discoveryProcesses }
 function Get-Content { return '{"profiles":[{"id":"self","name":"Self","profile_root":"C:\\Profiles\\self"}]}' }
 function netstat.exe {
@@ -120,3 +124,25 @@ $self = @($sources | Where-Object { $_.id -eq 'self' })
 if ($original.Count -ne 1 -or $original[0].port -ne 19335 -or $original[0].output -ne $usageHome) { throw 'Original desktop quota was not paired with the shared usage home.' }
 if ($self.Count -ne 1 -or $self[0].port -ne 19336 -or $self[0].output -ne 'C:\Profiles\self\usage') { throw 'Self desktop quota lost its profile isolation.' }
 Write-Output 'Original and Self desktop discovery checks passed.'
+
+$script:discoveryProcesses[1].ExecutablePath = $oldExe
+$script:oldStatus = 'Valid'
+$script:oldSubject = 'CN=Official publisher'
+$sources = @(Get-DesktopSources)
+if ($sources.Count -ne 2 -or @($sources | Where-Object { $_.id -eq 'self' -and $_.port -eq 19336 -and $_.output -eq 'C:\Profiles\self\usage' }).Count -ne 1) {
+  throw 'Store update hid the still-running official Self account or lost its pairing.'
+}
+foreach ($case in @('unsigned', 'publisher', 'folder', 'family')) {
+  $script:discoveryProcesses[1].ExecutablePath = $oldExe
+  $script:oldStatus = 'Valid'
+  $script:oldSubject = 'CN=Official publisher'
+  switch ($case) {
+    'unsigned' { $script:oldStatus = 'HashMismatch' }
+    'publisher' { $script:oldSubject = 'CN=Different publisher' }
+    'folder' { $script:discoveryProcesses[1].ExecutablePath = $oldExe.Replace('C:\Program Files\WindowsApps', 'C:\Downloads') }
+    'family' { $script:discoveryProcesses[1].ExecutablePath = $oldExe.Replace('__family', '__other') }
+  }
+  $sources = @(Get-DesktopSources)
+  if ($sources.Count -ne 1 -or $sources[0].id -ne 'default') { throw "Unverified old desktop accepted: $case" }
+}
+Write-Output 'Desktop discovery survives Store updates and rejects unverified previous executables.'

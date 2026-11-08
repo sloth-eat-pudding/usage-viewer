@@ -6,13 +6,33 @@ $node = (Get-Command node.exe -ErrorAction Stop).Source
 $driver = Join-Path $PSScriptRoot 'codex-desktop-usage.cjs'
 $mutex = [Threading.Mutex]::new($false, 'Local\UsageViewerCodexDesktopUsage')
 $locked = $false
+function Test-OfficialDesktopExecutable([string]$Path, $Packages) {
+  if (!$Path) { return $false }
+  foreach ($package in $Packages) {
+    $current = Join-Path $package.InstallLocation 'app\ChatGPT.exe'
+    if ($Path -ieq $current) { return $true }
+    # Store updates leave already-open account windows on the previous version.
+    # Accept only the protected package family and the same valid publisher.
+    $parent = [regex]::Escape((Split-Path -Parent $package.InstallLocation))
+    $name = [regex]::Escape($package.Name)
+    $family = [regex]::Escape(($package.PackageFamilyName -split '_', 2)[1])
+    if ($Path -notmatch ('^' + $parent + '\\' + $name + '_\d+\.\d+\.\d+\.\d+_(?:x64|arm64)__' + $family + '\\app\\ChatGPT\.exe$')) { continue }
+    try {
+      $currentSignature = Get-AuthenticodeSignature -LiteralPath $current -ErrorAction Stop
+      $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+      if ($currentSignature.Status -eq 'Valid' -and $signature.Status -eq 'Valid' -and
+          $signature.SignerCertificate.Subject -eq $currentSignature.SignerCertificate.Subject) { return $true }
+    } catch { }
+  }
+  return $false
+}
 function Get-DesktopSources {
   $packages = @(Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.SignatureKind -eq 'Store' -and !$_.IsDevelopmentMode })
-  $executables = @($packages | ForEach-Object { Join-Path $_.InstallLocation 'app\ChatGPT.exe' })
   $profiles = @()
   try { $profiles = @((Get-Content -LiteralPath (Join-Path $usageHome 'codex-account-profile-ui.json') -Raw | ConvertFrom-Json).profiles) } catch { }
   $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object {
-    $_.ExecutablePath -in $executables -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -match '--remote-debugging-port=\d+'
+    $_.CommandLine -notmatch '--type=' -and $_.CommandLine -match '--remote-debugging-port=\d+' -and
+    (Test-OfficialDesktopExecutable $_.ExecutablePath $packages)
   })
   $listeners = @(netstat.exe -ano -p tcp)
   $sources = @()
