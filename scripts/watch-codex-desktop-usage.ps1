@@ -27,14 +27,20 @@ function Test-OfficialDesktopExecutable([string]$Path, $Packages) {
   return $false
 }
 function Get-DesktopSources {
-  param([switch]$IncludeHidden)
+  param([switch]$IncludeHidden, [ref]$OriginalNeedsLauncher)
   $packages = @(Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.SignatureKind -eq 'Store' -and !$_.IsDevelopmentMode })
   $profiles = @()
   try { $profiles = @((Get-Content -LiteralPath (Join-Path $usageHome 'codex-account-profile-ui.json') -Raw | ConvertFrom-Json).profiles) } catch { }
   $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'ChatGPT.exe'" | Where-Object {
-    $_.CommandLine -notmatch '--type=' -and $_.CommandLine -match '--remote-debugging-port=\d+' -and
+    $_.CommandLine -and $_.CommandLine -notmatch '--type=' -and
+    ($OriginalNeedsLauncher -or $_.CommandLine -match '--remote-debugging-port=\d+') -and
     (Test-OfficialDesktopExecutable $_.ExecutablePath $packages)
   })
+  if ($OriginalNeedsLauncher) {
+    $OriginalNeedsLauncher.Value = [bool]($processes | Where-Object {
+      $_.CommandLine -notmatch '--user-data-dir=' -and $_.CommandLine -notmatch '--remote-debugging-port=\d+'
+    } | Select-Object -First 1)
+  }
   $listeners = @(netstat.exe -ano -p tcp)
   $sources = @()
   foreach ($process in $processes) {
@@ -85,13 +91,27 @@ try {
       ConvertTo-Json -InputObject $sources -Depth 5 -Compress | & $node $driver
     } catch { Write-Warning 'Codex desktop discovery unavailable; retrying next poll.' }
     if (!$Once -and $reapply.WaitOne(30000)) {
+      $message = 'Codex reapply failed. Try again.'
       try {
         $meterDriver = Join-Path $PSScriptRoot 'codex-native-meter.cjs'
-        foreach ($source in @(Get-DesktopSources -IncludeHidden)) {
-          & $node $meterDriver --port $source.port --browser-id $source.browser_id --codex-home $source.codex_home --usage-home $source.output --reinstall
-          if ($LASTEXITCODE -ne 0) { Write-Warning "Could not reapply the Codex meter for profile $($source.id)." }
+        $needsLauncher = $false
+        $targets = @(Get-DesktopSources -IncludeHidden -OriginalNeedsLauncher ([ref]$needsLauncher))
+        $updated = 0
+        foreach ($source in $targets) {
+          $result = & $node $meterDriver --port $source.port --browser-id $source.browser_id --codex-home $source.codex_home --usage-home $source.output --reinstall
+          if ($LASTEXITCODE -eq 0 -and ($result | ConvertFrom-Json).mounted -gt 0) { $updated++ }
         }
-      } catch { Write-Warning 'Codex desktop discovery unavailable; try reapplying again.' }
+        $message = "Codex reapply: $updated of $($targets.Count) eligible accounts updated."
+        if (!$targets.Count) { $message = 'No Codex window is available for reapply.' }
+        if ($needsLauncher) {
+          $message += "`nTo enable reapply in the original Codex, quit it including the tray process, then use Settings > Codex account windows > Open."
+        } elseif ($updated -lt $targets.Count) {
+          $message += "`nOpen a Codex chat and try again."
+        }
+      } catch { Write-Warning 'Codex desktop reapply failed.' }
+      try {
+        [IO.File]::WriteAllText((Join-Path $usageHome 'codex-reapply-status.txt'), $message)
+      } catch { Write-Warning 'Could not save Codex reapply status.' }
     }
   } while (!$Once)
 } finally {

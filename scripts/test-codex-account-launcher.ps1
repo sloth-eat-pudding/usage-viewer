@@ -130,6 +130,11 @@ if (@(Get-DesktopSources | Where-Object id -EQ 'default').Count -ne 0 -or @(Get-
   throw 'A hidden quota source must allow manual meter reapply without resuming quota polling.'
 }
 $script:desktopUsageEnabled = $true
+$script:discoveryProcesses += [pscustomobject]@{ ProcessId = 104; ExecutablePath = $exe; CommandLine = 'ChatGPT.exe' }
+$needsLauncher = $false
+if (@(Get-DesktopSources -IncludeHidden -OriginalNeedsLauncher ([ref]$needsLauncher)).Count -ne 2 -or !$needsLauncher) {
+  throw 'Manual reapply must report a regular original Codex launch without treating it as an attachable source.'
+}
 Write-Output 'Original and Self desktop discovery checks passed.'
 
 $script:discoveryProcesses[1].ExecutablePath = $oldExe

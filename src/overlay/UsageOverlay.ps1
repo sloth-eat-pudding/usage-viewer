@@ -282,14 +282,24 @@ $claudeReapplyButton.AccessibleName = 'Reapply Claude and Codex customizations'
 $claudeReapplyButton.TabStop = $false
 $claudeReapplyTip = New-Object System.Windows.Forms.ToolTip
 $claudeReapplyTip.SetToolTip($claudeReapplyButton, $claudeReapplyButton.AccessibleName)
+$codexReapplyStatus = Join-Path $usageHome 'codex-reapply-status.txt'
+$script:codexReapplyRequestedAt = $null
 $claudeReapplyButton.Add_Click({
   $requested = $false
+  $requestedAt = [DateTime]::UtcNow
   foreach ($eventName in @('UsageViewer.ClaudeSessionMeterReapply.v1', 'UsageViewer.CodexNativeMeterReapply.v1')) {
     $request = $null
     if (![Threading.EventWaitHandle]::TryOpenExisting($eventName, [ref]$request)) { continue }
-    try { $requested = $request.Set() -or $requested } finally { $request.Dispose() }
+    try {
+      if ($request.Set()) {
+        $requested = $true
+        if ($eventName -eq 'UsageViewer.CodexNativeMeterReapply.v1') { $script:codexReapplyRequestedAt = $requestedAt }
+      }
+    } finally { $request.Dispose() }
   }
-  if (!$requested) {
+  if ($requested) {
+    $claudeReapplyTip.Show('Reapply requested. Checking Codex windows...', $claudeReapplyButton, 5000)
+  } else {
     [System.Windows.Forms.MessageBox]::Show('The desktop helpers are unavailable. Restart Usage Viewer and try again.', 'Reapply customizations') | Out-Null
   }
 })
@@ -441,6 +451,19 @@ $form.Add_Shown({
 })
 $timer.Add_Tick({
   try {
+    if ($script:codexReapplyRequestedAt) {
+      $feedback = $null
+      if ([IO.File]::GetLastWriteTimeUtc($codexReapplyStatus) -ge $script:codexReapplyRequestedAt) {
+        try { $feedback = [IO.File]::ReadAllText($codexReapplyStatus) } catch [IO.IOException] { }
+      } elseif (([DateTime]::UtcNow - $script:codexReapplyRequestedAt).TotalSeconds -ge 45) {
+        $feedback = 'Codex has not responded yet.'
+      }
+      if ($feedback) {
+        $script:codexReapplyRequestedAt = $null
+        $claudeReapplyTip.SetToolTip($claudeReapplyButton, $feedback)
+        if (!$script:IsPinned) { $claudeReapplyTip.Show($feedback, $claudeReapplyButton, 12000) }
+      }
+    }
     if ($script:IsPinned -and -not $form.TopMost) {
       $form.TopMost = $true
     }

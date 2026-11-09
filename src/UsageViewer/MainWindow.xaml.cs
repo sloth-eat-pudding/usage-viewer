@@ -38,6 +38,9 @@ public partial class MainWindow : Window
     private HwndSource? _windowSource;
     private bool _isPinned;
     private bool _pinHotkeyWasDown;
+    private DateTime? _codexReapplyRequestedAt;
+    private readonly ToolTip _reapplyFeedback = new();
+    private DateTime _reapplyFeedbackUntil;
     private readonly bool _settingsOnly;
 
     public MainWindow()
@@ -85,6 +88,7 @@ public partial class MainWindow : Window
             var pinHotkeyDown = IsKeyDown(VkControl) && IsKeyDown(VkMenu) && IsKeyDown(VkP);
             if (pinHotkeyDown && !_pinHotkeyWasDown) OnPinClick(this, new RoutedEventArgs());
             _pinHotkeyWasDown = pinHotkeyDown;
+            UpdateReapplyFeedback();
             Refresh();
             EnsureTopmost();
         };
@@ -401,13 +405,48 @@ public partial class MainWindow : Window
     private void OnReapplyClick(object sender, RoutedEventArgs e)
     {
         var requested = false;
+        var requestedAt = DateTime.UtcNow;
         foreach (var eventName in new[] { "UsageViewer.ClaudeSessionMeterReapply.v1", "UsageViewer.CodexNativeMeterReapply.v1" })
         {
             if (!EventWaitHandle.TryOpenExisting(eventName, out var request)) continue;
-            using (request) requested |= request.Set();
+            using (request)
+            {
+                if (!request.Set()) continue;
+                requested = true;
+                if (eventName == "UsageViewer.CodexNativeMeterReapply.v1") _codexReapplyRequestedAt = requestedAt;
+            }
         }
 
-        if (!requested) MessageBox.Show("背景程式未就緒。請重啟 Usage Viewer 後再試。", "重新套用個人設定");
+        if (requested) ShowReapplyFeedback("已送出重新套用。正在檢查 Codex 視窗…", 5);
+        else MessageBox.Show("背景程式未就緒。請重啟 Usage Viewer 後再試。", "重新套用個人設定");
+    }
+
+    private void UpdateReapplyFeedback()
+    {
+        var now = DateTime.UtcNow;
+        if (now >= _reapplyFeedbackUntil) _reapplyFeedback.IsOpen = false;
+        if (_codexReapplyRequestedAt is not DateTime requestedAt) return;
+        var path = Path.Combine(_home, "codex-reapply-status.txt");
+        var message = "";
+        try
+        {
+            if (File.GetLastWriteTimeUtc(path) >= requestedAt) message = File.ReadAllText(path);
+        }
+        catch (IOException) { }
+        if (string.IsNullOrWhiteSpace(message) && (now - requestedAt).TotalSeconds >= 45)
+            message = "Codex 尚未回應。";
+        if (string.IsNullOrWhiteSpace(message)) return;
+        _codexReapplyRequestedAt = null;
+        ShowReapplyFeedback(message, 12);
+    }
+
+    private void ShowReapplyFeedback(string message, int seconds)
+    {
+        _reapplyFeedback.PlacementTarget = ReapplyButton;
+        _reapplyFeedback.Content = message;
+        ReapplyButton.ToolTip = _reapplyFeedback;
+        _reapplyFeedbackUntil = DateTime.UtcNow.AddSeconds(seconds);
+        if (!_isPinned) _reapplyFeedback.IsOpen = true;
     }
 
     private void EnsureTopmost()
