@@ -242,7 +242,7 @@ $pinButton.FlatAppearance.BorderSize = 0
 $pinButton.BackColor = $normalPanelColor
 $pinButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $pinButton.Font = New-Object System.Drawing.Font("Segoe UI", 8, [System.Drawing.FontStyle]::Bold)
-$pinButton.Location = New-Object System.Drawing.Point(212, 2)
+$pinButton.Location = New-Object System.Drawing.Point(296, 2)
 $pinButton.Size = New-Object System.Drawing.Size(20, 20)
 $pinButton.Text = "P"
 $pinButton.TabStop = $false
@@ -255,7 +255,7 @@ $settingsButton.FlatAppearance.BorderSize = 0
 $settingsButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $settingsButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $settingsButton.Font = New-Object System.Drawing.Font("Segoe UI", 7, [System.Drawing.FontStyle]::Bold)
-$settingsButton.Location = New-Object System.Drawing.Point(234, 2)
+$settingsButton.Location = New-Object System.Drawing.Point(296, 24)
 $settingsButton.Size = New-Object System.Drawing.Size(20, 20)
 $settingsButton.Text = "S"
 $settingsButton.TabStop = $false
@@ -275,7 +275,7 @@ $claudeReapplyButton.FlatStyle = $settingsButton.FlatStyle
 $claudeReapplyButton.FlatAppearance.BorderSize = 0
 $claudeReapplyButton.BackColor = $normalPanelColor
 $claudeReapplyButton.ForeColor = $settingsButton.ForeColor
-$claudeReapplyButton.Location = New-Object System.Drawing.Point(256, 2)
+$claudeReapplyButton.Location = New-Object System.Drawing.Point(318, 24)
 $claudeReapplyButton.Size = $settingsButton.Size
 $claudeReapplyButton.Text = [string][char]0x21BB
 $claudeReapplyButton.AccessibleName = 'Reapply Claude customizations'
@@ -300,7 +300,7 @@ $closeButton.FlatAppearance.BorderSize = 0
 $closeButton.BackColor = [System.Drawing.Color]::FromArgb(23, 23, 23)
 $closeButton.ForeColor = [System.Drawing.Color]::FromArgb(187, 187, 187)
 $closeButton.Font = New-Object System.Drawing.Font("Segoe UI", 9, [System.Drawing.FontStyle]::Bold)
-$closeButton.Location = New-Object System.Drawing.Point(308, 2)
+$closeButton.Location = New-Object System.Drawing.Point(318, 2)
 $closeButton.Size = New-Object System.Drawing.Size(20, 20)
 $closeButton.Text = "X"
 $closeButton.TabStop = $false
@@ -327,6 +327,7 @@ $applyPinState = {
   $panel.BackColor = if ($script:IsPinned) { $form.TransparencyKey } else { $normalPanelColor }
   $form.BackColor = $form.TransparencyKey
   Resize-OverlayToContent -Form $form -Title $title -Main $main -Detail $detail
+  & $layoutOverlay
   $unlockBounds = $pinButton.RectangleToScreen($pinButton.ClientRectangle)
   $unlockBounds.Inflate(2, 2)
   [ResizableOverlayForm]::UnlockButtonBounds = $unlockBounds
@@ -381,12 +382,9 @@ $script:heightBeforeCostExpand = $null
 $script:usageColumnControls = @()
 
 $layoutOverlay = {
-  $width = [Math]::Max(80, $panel.ClientSize.Width - 95)
-  $main.Width = $width
-  $detail.Width = $width
-  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 88 }
-  $settingsButton.Left = $panel.ClientSize.Width - 66
-  $claudeReapplyButton.Left = $panel.ClientSize.Width - 44
+  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 44 }
+  $settingsButton.Left = $panel.ClientSize.Width - 44
+  $claudeReapplyButton.Left = $panel.ClientSize.Width - 22
   $closeButton.Left = $panel.ClientSize.Width - 22
 }
 
@@ -718,7 +716,7 @@ function Resize-OverlayToContent {
   $gap = 1
   $right = 6
   $bottom = 7
-  $buttonArea = if ($script:IsPinned) { 26 } else { 88 }
+  $buttonArea = if ($script:IsPinned) { 26 } else { 44 }
   $mainVerticalPadding = 2
   $detailVerticalPadding = 5
 
@@ -726,18 +724,18 @@ function Resize-OverlayToContent {
   $mainTextHeight = [int]$mainSize.Height
   $detailTextWidth = [int]$detailSize.Width
   $detailTextHeight = [int]$detailSize.Height
-  $contentWidth = [int][Math]::Max($mainTextWidth + [int]$buttonArea, $detailTextWidth)
+  $contentWidth = [int][Math]::Max($mainTextWidth, $detailTextWidth)
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
-  $desiredWidth = [int][Math]::Min(900, [Math]::Max([int]$minimumWidth, $left + $contentWidth + $right))
+  $desiredWidth = [int][Math]::Min(900, [Math]::Max([int]$minimumWidth, $left + $contentWidth + $buttonArea + $right))
   $mainHeight = $mainTextHeight + $mainVerticalPadding
   $detailHeight = $detailTextHeight + $detailVerticalPadding
   $desiredHeight = [int][Math]::Max([int]$Form.MinimumSize.Height, $top + $mainHeight + $gap + $detailHeight + $bottom)
 
   $Form.ClientSize = [System.Drawing.Size]::new([int]$desiredWidth, [int]$desiredHeight)
   $Main.Location = [System.Drawing.Point]::new($left, $top)
-  $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $mainHeight)
+  $Main.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right - $buttonArea, $mainHeight)
   $Detail.Location = [System.Drawing.Point]::new($left, $top + $mainHeight + $gap)
-  $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right, $detailHeight)
+  $Detail.Size = [System.Drawing.Size]::new($desiredWidth - $left - $right - $buttonArea, $detailHeight)
 }
 
 function Resize-UsageColumns {
@@ -792,8 +790,8 @@ function Resize-UsageColumns {
     $column.Detail.SetBounds($x, (5 + $mainHeight), $width, $detailHeight)
     $x += $width + $columnGap
   }
-  # Reserve the pin/settings/close strip after the final column.
-  $buttonArea = if ($script:IsPinned) { 26 } else { 88 }
+  # Reserve two columns of buttons after the final usage column.
+  $buttonArea = if ($script:IsPinned) { 26 } else { 44 }
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
   $Form.ClientSize = [System.Drawing.Size]::new(
     [int][Math]::Max($minimumWidth, $x - $columnGap + 6 + $buttonArea),

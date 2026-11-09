@@ -23,22 +23,29 @@
       <!-- Column layout: one column per group, usage above its details. -->
       <StackPanel x:Name="ColumnsPanel" Grid.Column="0" Orientation="Horizontal"
                   Cursor="SizeAll" Visibility="Collapsed" />
-      <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0,0,0" VerticalAlignment="Top">
+      <Grid Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Top">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
         <Button x:Name="PinButton" Width="24" Height="22" Content="P"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
                 Cursor="Hand" ToolTip="Pin" Click="OnPinClick" />
-        <Button x:Name="SettingsButton" MinWidth="24" Height="22" Padding="5,0" Content="S"
+        <Button x:Name="CloseButton" Grid.Column="1" Width="24" Height="22" Content="&#x00D7;"
+                FontFamily="Segoe UI" FontSize="16" Foreground="#C8C8C8" Background="Transparent"
+                BorderThickness="0" Cursor="Hand" ToolTip="Close" Click="OnCloseClick" />
+        <Button x:Name="SettingsButton" Grid.Row="1" MinWidth="24" Height="22" Padding="5,0" Content="S"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
                 Cursor="Hand" ToolTip="Settings" Click="OnSettingsClick" />
-        <Button x:Name="ClaudeReapplyButton" Width="24" Height="22" Content="&#x21BB;"
+        <Button x:Name="ClaudeReapplyButton" Grid.Row="1" Grid.Column="1" Width="24" Height="22" Content="&#x21BB;"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
                 Cursor="Hand" ToolTip="重新套用 Claude 個人設定"
                 AutomationProperties.Name="重新套用 Claude 個人設定" Click="OnClaudeReapplyClick" />
-        <Button x:Name="CloseButton" Width="24" Height="22" Content="&#x00D7;"
-                FontFamily="Segoe UI" FontSize="16" Foreground="#C8C8C8"
-                Background="Transparent" BorderThickness="0" Cursor="Hand"
-                ToolTip="Close" Click="OnCloseClick" />
-      </StackPanel>
+      </Grid>
     </Grid>
   </Border>
 </Window>

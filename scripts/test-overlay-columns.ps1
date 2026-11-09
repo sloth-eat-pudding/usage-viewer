@@ -42,7 +42,7 @@ try {
     Assert-True ($column.Main.Left -ge $previousRight) 'Columns must not overlap'
     $previousRight = $column.Main.Right
   }
-  Assert-True ($form.ClientSize.Width -ge $previousRight + 66) 'Controls must not cover the last column'
+  Assert-True ($form.ClientSize.Width -eq $previousRight + 50) 'The last column must leave room for the compact controls and their margin'
   # Refresh the same groups across digit boundaries in both layouts and pin
   # states. Verify geometry, not just the text measurement helper.
   foreach ($layout in @('columns', 'stacked')) {
