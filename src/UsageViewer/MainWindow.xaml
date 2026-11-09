@@ -30,6 +30,10 @@
         <Button x:Name="SettingsButton" MinWidth="24" Height="22" Padding="5,0" Content="S"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
                 Cursor="Hand" ToolTip="Settings" Click="OnSettingsClick" />
+        <Button x:Name="ClaudeReapplyButton" Width="24" Height="22" Content="&#x21BB;"
+                Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
+                Cursor="Hand" ToolTip="重新套用 Claude 個人設定"
+                AutomationProperties.Name="重新套用 Claude 個人設定" Click="OnClaudeReapplyClick" />
         <Button x:Name="CloseButton" Width="24" Height="22" Content="&#x00D7;"
                 FontFamily="Segoe UI" FontSize="16" Foreground="#C8C8C8"
                 Background="Transparent" BorderThickness="0" Cursor="Hand"

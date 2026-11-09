@@ -269,6 +269,30 @@ $settingsButton.Add_Click({
 })
 $panel.Controls.Add($settingsButton)
 
+$claudeReapplyButton = New-Object System.Windows.Forms.Button
+$claudeReapplyButton.Anchor = $settingsButton.Anchor
+$claudeReapplyButton.FlatStyle = $settingsButton.FlatStyle
+$claudeReapplyButton.FlatAppearance.BorderSize = 0
+$claudeReapplyButton.BackColor = $normalPanelColor
+$claudeReapplyButton.ForeColor = $settingsButton.ForeColor
+$claudeReapplyButton.Location = New-Object System.Drawing.Point(256, 2)
+$claudeReapplyButton.Size = $settingsButton.Size
+$claudeReapplyButton.Text = [string][char]0x21BB
+$claudeReapplyButton.AccessibleName = 'Reapply Claude customizations'
+$claudeReapplyButton.TabStop = $false
+$claudeReapplyTip = New-Object System.Windows.Forms.ToolTip
+$claudeReapplyTip.SetToolTip($claudeReapplyButton, $claudeReapplyButton.AccessibleName)
+$claudeReapplyButton.Add_Click({
+  try {
+    $request = [Threading.EventWaitHandle]::OpenExisting('UsageViewer.ClaudeSessionMeterReapply.v1')
+    try { [void]$request.Set() } finally { $request.Dispose() }
+  } catch {
+    Write-OverlayError $_
+    [System.Windows.Forms.MessageBox]::Show('The Claude Desktop helper is unavailable. Restart Usage Viewer and try again.', 'Reapply Claude customizations') | Out-Null
+  }
+})
+$panel.Controls.Add($claudeReapplyButton)
+
 $closeButton = New-Object System.Windows.Forms.Button
 $closeButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
 $closeButton.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
@@ -295,6 +319,7 @@ $applyPinState = {
   $pinButton.Text = if ($script:IsPinned) { "U" } else { "P" }
   $pinButton.BackColor = if ($script:IsPinned) { [System.Drawing.Color]::FromArgb(45, 75, 45) } else { $normalPanelColor }
   $settingsButton.Visible = -not $script:IsPinned
+  $claudeReapplyButton.Visible = -not $script:IsPinned
   $closeButton.Visible = -not $script:IsPinned
   $costToggle.Enabled = -not $script:IsPinned
   # U mode keeps the background click-through while the unlock button remains
@@ -356,11 +381,12 @@ $script:heightBeforeCostExpand = $null
 $script:usageColumnControls = @()
 
 $layoutOverlay = {
-  $width = [Math]::Max(80, $panel.ClientSize.Width - 73)
+  $width = [Math]::Max(80, $panel.ClientSize.Width - 95)
   $main.Width = $width
   $detail.Width = $width
-  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 66 }
-  $settingsButton.Left = $panel.ClientSize.Width - 44
+  $pinButton.Left = if ($script:IsPinned) { $panel.ClientSize.Width - 26 } else { $panel.ClientSize.Width - 88 }
+  $settingsButton.Left = $panel.ClientSize.Width - 66
+  $claudeReapplyButton.Left = $panel.ClientSize.Width - 44
   $closeButton.Left = $panel.ClientSize.Width - 22
 }
 
@@ -692,7 +718,7 @@ function Resize-OverlayToContent {
   $gap = 1
   $right = 6
   $bottom = 7
-  $buttonArea = if ($script:IsPinned) { 26 } else { 66 }
+  $buttonArea = if ($script:IsPinned) { 26 } else { 88 }
   $mainVerticalPadding = 2
   $detailVerticalPadding = 5
 
@@ -767,7 +793,7 @@ function Resize-UsageColumns {
     $x += $width + $columnGap
   }
   # Reserve the pin/settings/close strip after the final column.
-  $buttonArea = if ($script:IsPinned) { 26 } else { 66 }
+  $buttonArea = if ($script:IsPinned) { 26 } else { 88 }
   $minimumWidth = if ($script:IsPinned) { 180 } else { 340 }
   $Form.ClientSize = [System.Drawing.Size]::new(
     [int][Math]::Max($minimumWidth, $x - $columnGap + 6 + $buttonArea),

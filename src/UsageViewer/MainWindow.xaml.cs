@@ -374,6 +374,7 @@ public partial class MainWindow : Window
         OverlayBorder.Background = _isPinned ? System.Windows.Media.Brushes.Transparent : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(232, 23, 23, 23));
         OverlayBorder.BorderBrush = _isPinned ? System.Windows.Media.Brushes.Transparent : System.Windows.Media.Brushes.DimGray;
         SettingsButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
+        ClaudeReapplyButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         CloseButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         MinWidth = _isPinned ? 180 : 340;
         EnsureTopmost();
@@ -395,6 +396,17 @@ public partial class MainWindow : Window
     private void OnCloseClick(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void OnClaudeReapplyClick(object sender, RoutedEventArgs e)
+    {
+        if (EventWaitHandle.TryOpenExisting("UsageViewer.ClaudeSessionMeterReapply.v1", out var request))
+        {
+            using (request) request.Set();
+            return;
+        }
+
+        MessageBox.Show("Claude Desktop 背景程式未就緒。請重啟 Usage Viewer 後再試。", "重新套用 Claude 個人設定");
     }
 
     private void EnsureTopmost()

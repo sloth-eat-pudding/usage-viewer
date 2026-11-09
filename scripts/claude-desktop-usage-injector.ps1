@@ -831,6 +831,7 @@ function Invoke-BoundedInjection {
 }
 
 Write-InjectorLog 'supervisor started'
+$meterReapply = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::AutoReset, 'UsageViewer.ClaudeSessionMeterReapply.v1')
 $states = @{}
 $meterStates = @{}
 $visibilityUpdated = @{}
@@ -861,11 +862,17 @@ try {
         }
         $activeInstances = @($meterWindows | ForEach-Object { "$($_.ProcessId)-$($_.Handle)" })
         foreach ($instance in @($meterStates.Keys)) { if ($activeInstances -notcontains $instance) { $meterStates.Remove($instance) } }
+        if ($activeInstances.Count -gt 0 -and $meterReapply.WaitOne(0)) {
+          foreach ($instance in $activeInstances) {
+            $meterStates[$instance] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue; Reapply = $true }
+          }
+          Write-InjectorLog "meter reapply requested windows=$($activeInstances.Count)"
+        }
         $meterAttempted = $false
         foreach ($meterWindow in $meterWindows) {
           $instance = "$($meterWindow.ProcessId)-$($meterWindow.Handle)"
-          if (Test-SessionMeterHeartbeat $instance) { continue }
-          if (-not $meterStates.ContainsKey($instance)) { $meterStates[$instance] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue } }
+          if (-not $meterStates[$instance].Reapply -and (Test-SessionMeterHeartbeat $instance)) { continue }
+          if (-not $meterStates.ContainsKey($instance)) { $meterStates[$instance] = @{ Failures = 0; NextAttempt = [DateTimeOffset]::MinValue; Reapply = $false } }
           $meterState = $meterStates[$instance]
           if ([DateTimeOffset]::UtcNow -lt $meterState.NextAttempt) { continue }
           if ([ClaudeUsageInjectorNative]::IdleMilliseconds() -lt 2500) { break }
@@ -876,6 +883,7 @@ try {
           $meterAttempted = $true
           Write-InjectorLog "meter attempt window=$instance"
           if (Invoke-BoundedInjection $meterWindow -MeterOnly) {
+            $meterState.Reapply = $false
             $meterState.Failures = 0
             $meterState.NextAttempt = [DateTimeOffset]::UtcNow.AddSeconds(75)
             Write-InjectorLog "meter verified window=$instance version=1.3.0"
@@ -947,6 +955,7 @@ try {
     }
   }
 } finally {
+  $meterReapply.Dispose()
   Write-InjectorLog 'supervisor stopped'
   if ($mutex) { $mutex.ReleaseMutex(); $mutex.Dispose() }
 }
