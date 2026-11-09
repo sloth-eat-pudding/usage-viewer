@@ -278,17 +278,19 @@ $claudeReapplyButton.ForeColor = $settingsButton.ForeColor
 $claudeReapplyButton.Location = New-Object System.Drawing.Point(318, 24)
 $claudeReapplyButton.Size = $settingsButton.Size
 $claudeReapplyButton.Text = [string][char]0x21BB
-$claudeReapplyButton.AccessibleName = 'Reapply Claude customizations'
+$claudeReapplyButton.AccessibleName = 'Reapply Claude and Codex customizations'
 $claudeReapplyButton.TabStop = $false
 $claudeReapplyTip = New-Object System.Windows.Forms.ToolTip
 $claudeReapplyTip.SetToolTip($claudeReapplyButton, $claudeReapplyButton.AccessibleName)
 $claudeReapplyButton.Add_Click({
-  try {
-    $request = [Threading.EventWaitHandle]::OpenExisting('UsageViewer.ClaudeSessionMeterReapply.v1')
-    try { [void]$request.Set() } finally { $request.Dispose() }
-  } catch {
-    Write-OverlayError $_
-    [System.Windows.Forms.MessageBox]::Show('The Claude Desktop helper is unavailable. Restart Usage Viewer and try again.', 'Reapply Claude customizations') | Out-Null
+  $requested = $false
+  foreach ($eventName in @('UsageViewer.ClaudeSessionMeterReapply.v1', 'UsageViewer.CodexNativeMeterReapply.v1')) {
+    $request = $null
+    if (![Threading.EventWaitHandle]::TryOpenExisting($eventName, [ref]$request)) { continue }
+    try { $requested = $request.Set() -or $requested } finally { $request.Dispose() }
+  }
+  if (!$requested) {
+    [System.Windows.Forms.MessageBox]::Show('The desktop helpers are unavailable. Restart Usage Viewer and try again.', 'Reapply customizations') | Out-Null
   }
 })
 $panel.Controls.Add($claudeReapplyButton)

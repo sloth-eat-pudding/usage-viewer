@@ -112,7 +112,8 @@ function netstat.exe {
     '  TCP  127.0.0.1:19336  0.0.0.0:0  LISTENING  102',
     '  TCP  127.0.0.1:19337  0.0.0.0:0  LISTENING  103')
 }
-function Test-UsageSourceEnabled { return $true }
+$script:desktopUsageEnabled = $true
+function Test-UsageSourceEnabled { return $script:desktopUsageEnabled }
 function Invoke-RestMethod { param($Uri)
   $port = ([Uri]$Uri).Port
   return @{ webSocketDebuggerUrl = "ws://127.0.0.1:$port/devtools/browser/11111111-2222-3333-4444-555555555555" }
@@ -123,6 +124,12 @@ $original = @($sources | Where-Object { $_.id -eq 'default' })
 $self = @($sources | Where-Object { $_.id -eq 'self' })
 if ($original.Count -ne 1 -or $original[0].port -ne 19335 -or $original[0].output -ne $usageHome) { throw 'Original desktop quota was not paired with the shared usage home.' }
 if ($self.Count -ne 1 -or $self[0].port -ne 19336 -or $self[0].output -ne 'C:\Profiles\self\usage') { throw 'Self desktop quota lost its profile isolation.' }
+if ($original[0].codex_home -ne (Join-Path $env:USERPROFILE '.codex') -or $self[0].codex_home -ne 'C:\Profiles\self\codex') { throw 'Meter reapply must use the session home for the matching account.' }
+$script:desktopUsageEnabled = $false
+if (@(Get-DesktopSources | Where-Object id -EQ 'default').Count -ne 0 -or @(Get-DesktopSources -IncludeHidden | Where-Object id -EQ 'default').Count -ne 1) {
+  throw 'A hidden quota source must allow manual meter reapply without resuming quota polling.'
+}
+$script:desktopUsageEnabled = $true
 Write-Output 'Original and Self desktop discovery checks passed.'
 
 $script:discoveryProcesses[1].ExecutablePath = $oldExe

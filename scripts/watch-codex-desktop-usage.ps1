@@ -27,6 +27,7 @@ function Test-OfficialDesktopExecutable([string]$Path, $Packages) {
   return $false
 }
 function Get-DesktopSources {
+  param([switch]$IncludeHidden)
   $packages = @(Get-AppxPackage -Name OpenAI.Codex | Where-Object { $_.SignatureKind -eq 'Store' -and !$_.IsDevelopmentMode })
   $profiles = @()
   try { $profiles = @((Get-Content -LiteralPath (Join-Path $usageHome 'codex-account-profile-ui.json') -Raw | ConvertFrom-Json).profiles) } catch { }
@@ -53,18 +54,20 @@ function Get-DesktopSources {
     if ($profile.Count -eq 1 -and $profile[0].id -match '^[a-zA-Z0-9_-]+$') {
       $id = [string]$profile[0].id; $name = [string]$profile[0].name
       $output = Join-Path $profile[0].profile_root 'usage'
+      $codexHome = Join-Path $profile[0].profile_root 'codex'
     } elseif (!$desktopPath) {
       $id = 'default'; $name = 'Codex'; $output = $usageHome
+      $codexHome = Join-Path $env:USERPROFILE '.codex'
     } else {
       # Unregistered test instances are deliberately excluded.
       continue
     }
-    if ($id -eq 'default' -and -not (Test-UsageSourceEnabled $usageHome 'codex_desktop_group')) { continue }
+    if (!$IncludeHidden -and $id -eq 'default' -and -not (Test-UsageSourceEnabled $usageHome 'codex_desktop_group')) { continue }
     try {
       $version = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 3
       $socket = [Uri]$version.webSocketDebuggerUrl
       if ($socket.Scheme -ne 'ws' -or $socket.Host -ne '127.0.0.1' -or $socket.Port -ne $port -or $socket.UserInfo -or $socket.Query -or $socket.Fragment -or $socket.AbsolutePath -notmatch '^/devtools/browser/([a-fA-F0-9-]{36})$') { continue }
-      $sources += [pscustomobject]@{ id = $id; name = $name; port = $port; browser_id = $Matches[1]; output = $output; home = $usageHome }
+      $sources += [pscustomobject]@{ id = $id; name = $name; port = $port; browser_id = $Matches[1]; output = $output; home = $usageHome; codex_home = $codexHome }
     } catch { }
   }
   # An ambiguous profile never borrows another process's result.
@@ -73,11 +76,26 @@ function Get-DesktopSources {
 try {
   try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
   if (!$locked) { return }
+  if (!$Once) {
+    $reapply = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::AutoReset, 'UsageViewer.CodexNativeMeterReapply.v1')
+  }
   do {
     try {
       $sources = @(Get-DesktopSources)
       ConvertTo-Json -InputObject $sources -Depth 5 -Compress | & $node $driver
     } catch { Write-Warning 'Codex desktop discovery unavailable; retrying next poll.' }
-    if (!$Once) { Start-Sleep -Seconds 30 }
+    if (!$Once -and $reapply.WaitOne(30000)) {
+      try {
+        $meterDriver = Join-Path $PSScriptRoot 'codex-native-meter.cjs'
+        foreach ($source in @(Get-DesktopSources -IncludeHidden)) {
+          & $node $meterDriver --port $source.port --browser-id $source.browser_id --codex-home $source.codex_home --usage-home $source.output --reinstall
+          if ($LASTEXITCODE -ne 0) { Write-Warning "Could not reapply the Codex meter for profile $($source.id)." }
+        }
+      } catch { Write-Warning 'Codex desktop discovery unavailable; try reapplying again.' }
+    }
   } while (!$Once)
-} finally { if ($locked) { $mutex.ReleaseMutex() }; $mutex.Dispose() }
+} finally {
+  if ($reapply) { $reapply.Dispose() }
+  if ($locked) { $mutex.ReleaseMutex() }
+  $mutex.Dispose()
+}

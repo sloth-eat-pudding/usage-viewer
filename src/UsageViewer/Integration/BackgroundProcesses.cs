@@ -29,6 +29,7 @@ internal sealed class BackgroundProcesses : IDisposable
                 ("UsageViewer.UsageSourcePolicy.ps1", "usage-source-policy.ps1"),
                 ("UsageViewer.CodexDesktopUsage.cjs", "codex-desktop-usage.cjs"),
                 ("UsageViewer.CodexNativeDriver.cjs", "codex-native-meter.cjs"),
+                ("UsageViewer.CodexNativeMeter.js", "codex-native-meter.js"),
                 ("UsageViewer.CodexProfileMetrics.cjs", "codex-profile-metrics.cjs") })
             {
                 using var resource = typeof(UsageReaderService).Assembly.GetManifestResourceStream(resourceName)

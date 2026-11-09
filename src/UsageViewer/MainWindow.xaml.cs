@@ -374,7 +374,7 @@ public partial class MainWindow : Window
         OverlayBorder.Background = _isPinned ? System.Windows.Media.Brushes.Transparent : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(232, 23, 23, 23));
         OverlayBorder.BorderBrush = _isPinned ? System.Windows.Media.Brushes.Transparent : System.Windows.Media.Brushes.DimGray;
         SettingsButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
-        ClaudeReapplyButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
+        ReapplyButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         CloseButton.Visibility = _isPinned ? Visibility.Collapsed : Visibility.Visible;
         MinWidth = _isPinned ? 180 : 340;
         EnsureTopmost();
@@ -398,15 +398,16 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private void OnClaudeReapplyClick(object sender, RoutedEventArgs e)
+    private void OnReapplyClick(object sender, RoutedEventArgs e)
     {
-        if (EventWaitHandle.TryOpenExisting("UsageViewer.ClaudeSessionMeterReapply.v1", out var request))
+        var requested = false;
+        foreach (var eventName in new[] { "UsageViewer.ClaudeSessionMeterReapply.v1", "UsageViewer.CodexNativeMeterReapply.v1" })
         {
-            using (request) request.Set();
-            return;
+            if (!EventWaitHandle.TryOpenExisting(eventName, out var request)) continue;
+            using (request) requested |= request.Set();
         }
 
-        MessageBox.Show("Claude Desktop 背景程式未就緒。請重啟 Usage Viewer 後再試。", "重新套用 Claude 個人設定");
+        if (!requested) MessageBox.Show("背景程式未就緒。請重啟 Usage Viewer 後再試。", "重新套用個人設定");
     }
 
     private void EnsureTopmost()

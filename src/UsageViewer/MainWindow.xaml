@@ -41,10 +41,10 @@
         <Button x:Name="SettingsButton" Grid.Row="1" MinWidth="24" Height="22" Padding="5,0" Content="S"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
                 Cursor="Hand" ToolTip="Settings" Click="OnSettingsClick" />
-        <Button x:Name="ClaudeReapplyButton" Grid.Row="1" Grid.Column="1" Width="24" Height="22" Content="&#x21BB;"
+        <Button x:Name="ReapplyButton" Grid.Row="1" Grid.Column="1" Width="24" Height="22" Content="&#x21BB;"
                 Foreground="#C8C8C8" Background="Transparent" BorderThickness="0"
-                Cursor="Hand" ToolTip="重新套用 Claude 個人設定"
-                AutomationProperties.Name="重新套用 Claude 個人設定" Click="OnClaudeReapplyClick" />
+                Cursor="Hand" ToolTip="重新套用 Claude 和 Codex 個人設定"
+                AutomationProperties.Name="重新套用 Claude 和 Codex 個人設定" Click="OnReapplyClick" />
       </Grid>
     </Grid>
   </Border>
