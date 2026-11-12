@@ -18,6 +18,8 @@ function Test-OfficialDesktopExecutable([string]$Path, $Packages) {
     $family = [regex]::Escape(($package.PackageFamilyName -split '_', 2)[1])
     if ($Path -notmatch ('^' + $parent + '\\' + $name + '_\d+\.\d+\.\d+\.\d+_(?:x64|arm64)__' + $family + '\\app\\ChatGPT\.exe$')) { continue }
     try {
+      # Match the running PowerShell host when PSModulePath contains other versions.
+      Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
       $currentSignature = Get-AuthenticodeSignature -LiteralPath $current -ErrorAction Stop
       $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
       if ($currentSignature.Status -eq 'Valid' -and $signature.Status -eq 'Valid' -and

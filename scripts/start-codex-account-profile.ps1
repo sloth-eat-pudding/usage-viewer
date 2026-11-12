@@ -34,6 +34,9 @@ function Test-OfficialProfileExecutable([string]$Path) {
   $familySuffix = [regex]::Escape(($package.PackageFamilyName -split '_', 2)[1])
   $pattern = '^' + [regex]::Escape($installParent) + '\\' + $packageName + '_\d+\.\d+\.\d+\.\d+_(?:x64|arm64)__' + $familySuffix + '\\app\\ChatGPT\.exe$'
   if (!$Path -or $Path -notmatch $pattern) { return $false }
+  # Load the inbox module for this PowerShell host, even if another version
+  # of PowerShell added its modules to the inherited PSModulePath.
+  Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
   $currentSignature = Get-AuthenticodeSignature -LiteralPath $exe
   $signature = Get-AuthenticodeSignature -LiteralPath $Path
   return $currentSignature.Status -eq 'Valid' -and $signature.Status -eq 'Valid' -and
